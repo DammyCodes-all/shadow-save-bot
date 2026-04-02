@@ -32,7 +32,7 @@ export class BotUpdate {
       return;
     }
 
-    await ctx.reply('⏳ Downloading...');
+    const downloadingMessage = await ctx.reply('⏳ Downloading...');
 
     try {
       const mediaInfo = await this.downloadService.getMediaInfo(url);
@@ -42,24 +42,50 @@ export class BotUpdate {
         mediaInfo.images &&
         mediaInfo.images.length > 0
       ) {
-        await ctx.replyWithMediaGroup(
-          mediaInfo.images.map((imageUrl) => ({
-            type: 'photo',
-            media: imageUrl,
-          })),
+        for (let index = 0; index < mediaInfo.images.length; index += 10) {
+          const imageBatch = mediaInfo.images.slice(index, index + 10);
+
+          await ctx.replyWithMediaGroup(
+            imageBatch.map((imageUrl) => ({
+              type: 'photo',
+              media: imageUrl,
+            })),
+          );
+        }
+
+        await ctx.telegram.deleteMessage(
+          downloadingMessage.chat.id,
+          downloadingMessage.message_id,
         );
         return;
       }
 
       if (mediaInfo.videoUrl) {
         await ctx.replyWithVideo(mediaInfo.videoUrl);
+        await ctx.telegram.deleteMessage(
+          downloadingMessage.chat.id,
+          downloadingMessage.message_id,
+        );
         return;
       }
 
       await ctx.reply(
         "❌ Failed to download. Make sure it's a valid public TikTok link.",
       );
+      try {
+        await ctx.telegram.deleteMessage(
+          downloadingMessage.chat.id,
+          downloadingMessage.message_id,
+        );
+      } catch {}
     } catch {
+      try {
+        await ctx.telegram.deleteMessage(
+          downloadingMessage.chat.id,
+          downloadingMessage.message_id,
+        );
+      } catch {}
+
       await ctx.reply(
         "❌ Failed to download. Make sure it's a valid public TikTok link.",
       );
