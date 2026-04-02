@@ -1,36 +1,73 @@
-import { Injectable } from '@nestjs/common';
-import { spawn } from 'node:child_process';
-import { Readable } from 'node:stream';
+import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
+
+type TikwmResponse = {
+	code: number;
+	msg?: string;
+	data?: {
+		title?: string;
+		play?: string;
+		images?: string[];
+		music?: string;
+		author?: {
+			nickname?: string;
+		};
+	};
+};
+
+type MediaInfo = {
+	isSlideshow: boolean;
+	title: string;
+	videoUrl: string | null;
+	images: string[] | null;
+	music: string;
+	author: string;
+};
 
 @Injectable()
 export class DownloadService {
-	getVideoStream(url: string): Readable {
-		const process = spawn('yt-dlp', ['-o', '-', url], {
-			stdio: ['ignore', 'pipe', 'pipe'],
-		});
+	async getMediaInfo(url: string): Promise<MediaInfo> {
+		const endpoint = `https://www.tikwm.com/api/?url=${encodeURIComponent(url)}`;
 
-		if (!process.stdout) {
-			throw new Error('Failed to open yt-dlp output stream');
+		let response: Response;
+		try {
+			response = await fetch(endpoint);
+		} catch {
+			throw new HttpException(
+				'Failed to reach TikWM service',
+				HttpStatus.BAD_GATEWAY,
+			);
 		}
 
-		let stderr = '';
+		if (!response.ok) {
+			throw new HttpException(
+				`TikWM request failed with status ${response.status}`,
+				HttpStatus.BAD_GATEWAY,
+			);
+		}
 
-		process.stderr?.on('data', (chunk: Buffer) => {
-			stderr += chunk.toString();
-		});
+		const payload = (await response.json()) as TikwmResponse;
 
-		process.on('error', () => {
-			process.stdout?.destroy(new Error('yt-dlp process failed to start'));
-		});
+		if (payload.code !== 0) {
+			throw new HttpException(
+				payload.msg ?? 'TikWM failed to process this URL',
+				HttpStatus.BAD_REQUEST,
+			);
+		}
 
-		process.on('close', (code) => {
-			if (code !== 0) {
-				process.stdout?.destroy(
-					new Error(`yt-dlp failed with exit code ${code}: ${stderr.trim()}`),
-				);
-			}
-		});
+		const data = payload.data;
+		if (!data) {
+			throw new HttpException('TikWM returned empty data', HttpStatus.BAD_GATEWAY);
+		}
 
-		return process.stdout;
+		const isSlideshow = Array.isArray(data.images) && data.images.length > 0;
+
+		return {
+			isSlideshow,
+			title: data.title ?? '',
+			videoUrl: isSlideshow ? null : (data.play ?? null),
+			images: isSlideshow ? data.images! : null,
+			music: data.music ?? '',
+			author: data.author?.nickname ?? '',
+		};
 	}
 }

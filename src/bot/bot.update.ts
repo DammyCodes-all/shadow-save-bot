@@ -32,28 +32,36 @@ export class BotUpdate {
       return;
     }
 
-    const downloadingMessage = await ctx.reply(
-      this.botService.getDownloadQueuedMessage(url),
-    );
+    await ctx.reply('⏳ Downloading...');
 
     try {
-      const stream = this.downloadService.getVideoStream(url);
-      await ctx.replyWithVideo({ source: stream });
+      const mediaInfo = await this.downloadService.getMediaInfo(url);
 
-      await ctx.telegram.deleteMessage(
-        downloadingMessage.chat.id,
-        downloadingMessage.message_id,
-      );
-    } catch {
-      try {
-        await ctx.telegram.deleteMessage(
-          downloadingMessage.chat.id,
-          downloadingMessage.message_id,
+      if (
+        mediaInfo.isSlideshow &&
+        mediaInfo.images &&
+        mediaInfo.images.length > 0
+      ) {
+        await ctx.replyWithMediaGroup(
+          mediaInfo.images.map((imageUrl) => ({
+            type: 'photo',
+            media: imageUrl,
+          })),
         );
-      } catch {}
+        return;
+      }
+
+      if (mediaInfo.videoUrl) {
+        await ctx.replyWithVideo(mediaInfo.videoUrl);
+        return;
+      }
 
       await ctx.reply(
-        'Sorry, I could not download this video right now. Please try again or use another TikTok link in a moment.',
+        "❌ Failed to download. Make sure it's a valid public TikTok link.",
+      );
+    } catch {
+      await ctx.reply(
+        "❌ Failed to download. Make sure it's a valid public TikTok link.",
       );
     }
   }
