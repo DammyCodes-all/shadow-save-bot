@@ -3,10 +3,12 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TelegrafModule } from 'nestjs-telegraf';
 import { BotUpdate } from './bot.update';
 import { BotService } from './bot.service';
+import { DownloadModule } from '../download/download.module';
 
 @Module({
   imports: [
     ConfigModule,
+    DownloadModule,
     TelegrafModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
