@@ -1,31 +1,17 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
-
-type TikwmResponse = {
-	code: number;
-	msg?: string;
-	data?: {
-		title?: string;
-		play?: string;
-		images?: string[];
-		music?: string;
-		author?: {
-			nickname?: string;
-		};
-	};
-};
-
-type MediaInfo = {
-	isSlideshow: boolean;
-	title: string;
-	videoUrl: string | null;
-	images: string[] | null;
-	music: string;
-	author: string;
-};
+import { MediaCacheService } from './media-cache.service';
+import type { MediaInfo, TikwmResponse } from './download.types';
 
 @Injectable()
 export class DownloadService {
+	constructor(private readonly mediaCacheService: MediaCacheService) {}
+
 	async getMediaInfo(url: string): Promise<MediaInfo> {
+		const cached = await this.mediaCacheService.get(url);
+		if (cached) {
+			return cached;
+		}
+
 		const endpoint = `https://www.tikwm.com/api/?url=${encodeURIComponent(url)}`;
 
 		let response: Response;
@@ -61,7 +47,7 @@ export class DownloadService {
 
 		const isSlideshow = Array.isArray(data.images) && data.images.length > 0;
 
-		return {
+		const mediaInfo: MediaInfo = {
 			isSlideshow,
 			title: data.title ?? '',
 			videoUrl: isSlideshow ? null : (data.play ?? null),
@@ -69,5 +55,9 @@ export class DownloadService {
 			music: data.music ?? '',
 			author: data.author?.nickname ?? '',
 		};
+
+		await this.mediaCacheService.set(url, mediaInfo);
+
+		return mediaInfo;
 	}
 }
