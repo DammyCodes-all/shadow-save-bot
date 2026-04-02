@@ -33,6 +33,7 @@ The app does not write downloaded media to disk.
 - In-memory cache for TikWM results
 - Auto-expiring cache cleanup to avoid memory growth
 - Friendly error handling for invalid or private links
+- A "Share with friends" button that shares the bot itself after successful video downloads
 
 ## Architecture
 
@@ -47,7 +48,8 @@ The app is organized by feature and keeps the Telegram layer separate from the T
 5. `MediaCacheService` returns a cached result when possible.
 6. If TikWM returns a slideshow, the bot sends the images in groups of 10.
 7. If TikWM returns a video, the bot sends the video URL directly.
-8. The temporary downloading message is deleted after the media is sent.
+8. On successful video downloads, the bot adds a "Share with friends" button that opens the bot invite link.
+9. The temporary downloading message is deleted after the media is sent.
 
 ### Module breakdown
 
@@ -102,6 +104,7 @@ Telegram update handler.
 - Handles text messages
 - Sends the downloading status message
 - Sends video or slideshow output
+- Adds a share button to successful video responses
 - Replies with a friendly error when download fails
 
 ## Data model
@@ -176,6 +179,7 @@ Create a local `.env` file or set environment variables before starting the app.
 | Variable               | Required | Description                                    |
 | ---------------------- | -------- | ---------------------------------------------- |
 | `TELEGRAM_BOT_API_KEY` | Yes      | Telegram bot token from BotFather              |
+| `TELEGRAM_BOT_USERNAME`| Yes      | Bot username used for the share button invite   |
 | `PORT`                 | No       | HTTP port for the Nest app, defaults to `3000` |
 
 ## Setup
@@ -243,6 +247,7 @@ The bot returns a friendly error message when:
 - The bot handler keeps all Telegram-specific behavior in `BotUpdate`
 - Download and cache logic stays in the download layer
 - Environment validation fails fast at startup if the bot token is missing
+- Environment validation fails fast at startup if the bot username is missing
 - The app avoids writing temporary media files to disk
 
 ## Future improvements
@@ -252,6 +257,7 @@ The bot returns a friendly error message when:
 - Add a small health endpoint or startup log for easier deployment checks
 - Replace the in-memory cache with Redis if the app ever needs horizontal scaling
 - Add richer metadata replies, such as title, author, or music info
+- Add a configurable share button title or share text if you want more control over the invite flow
 
 ## License
 
