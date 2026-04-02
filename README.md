@@ -1,98 +1,260 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Shadow Save Bot
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+Built with 💜 by aluminate
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+Shadow Save Bot is a NestJS Telegram bot that downloads TikTok media and sends it directly back to the user without saving files to disk.
 
-## Description
+It uses:
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+- NestJS for application structure and dependency injection
+- `nestjs-telegraf` for Telegram bot integration
+- TikWM for TikTok media extraction
+- `cache-manager` for in-memory caching with automatic expiration
+- Telegram media groups for slideshow responses
 
-## Project setup
+## What it does
 
-```bash
-$ pnpm install
+The bot accepts a TikTok URL in Telegram and responds in one of three ways:
+
+- If the link is valid and points to a video, it sends the video back to the chat.
+- If the link is a slideshow, it sends the images as Telegram media groups.
+- If the link is invalid or TikWM fails, it replies with a friendly error message.
+
+The app does not write downloaded media to disk.
+
+## Features
+
+- Telegram bot built with NestJS
+- `@start` welcome message
+- TikTok URL validation
+- TikWM metadata lookup
+- Direct video streaming to Telegram
+- Slideshow support with batched media groups
+- In-memory cache for TikWM results
+- Auto-expiring cache cleanup to avoid memory growth
+- Friendly error handling for invalid or private links
+
+## Architecture
+
+The app is organized by feature and keeps the Telegram layer separate from the TikTok download layer.
+
+### High-level flow
+
+1. The user sends a text message in Telegram.
+2. `BotUpdate` validates that the message looks like a TikTok URL.
+3. The bot replies with `⏳ Downloading...`.
+4. `DownloadService` looks up the media information from TikWM.
+5. `MediaCacheService` returns a cached result when possible.
+6. If TikWM returns a slideshow, the bot sends the images in groups of 10.
+7. If TikWM returns a video, the bot sends the video URL directly.
+8. The temporary downloading message is deleted after the media is sent.
+
+### Module breakdown
+
+#### `AppModule`
+
+Root application module.
+
+- Loads `ConfigModule` globally
+- Validates environment variables
+- Imports the bot and download feature modules
+
+#### `BotModule`
+
+Telegram integration module.
+
+- Configures `nestjs-telegraf`
+- Registers `BotUpdate`
+- Registers `BotService`
+- Imports `DownloadModule` so the bot can access media lookup logic
+
+#### `DownloadModule`
+
+Media lookup and cache module.
+
+- Provides `DownloadService`
+- Provides `MediaCacheService`
+- Registers `CacheModule` in memory with TTL support
+
+#### `DownloadService`
+
+Responsible for talking to TikWM.
+
+- Fetches media metadata with native `fetch`
+- Converts the TikWM response into a strict `MediaInfo` shape
+- Caches successful responses through `MediaCacheService`
+
+#### `MediaCacheService`
+
+Owns cache behavior.
+
+- Stores `MediaInfo` entries in memory
+- Deletes expired entries lazily on read
+- Runs periodic cleanup
+- Enforces a maximum entry count
+- Clears the cache on module shutdown
+
+#### `BotUpdate`
+
+Telegram update handler.
+
+- Handles `/start`
+- Handles text messages
+- Sends the downloading status message
+- Sends video or slideshow output
+- Replies with a friendly error when download fails
+
+## Data model
+
+`DownloadService.getMediaInfo(url)` returns:
+
+```ts
+{
+  isSlideshow: boolean;
+  title: string;
+  videoUrl: string | null;
+  images: string[] | null;
+  music: string;
+  author: string;
+}
 ```
 
-## Compile and run the project
+### TikWM result behavior
 
-```bash
-# development
-$ pnpm run start
+- `isSlideshow` is `true` when `data.images` exists and has items
+- `videoUrl` is used for normal videos
+- `images` is used for slideshow posts
+- `music` and `author` are kept for future metadata handling
 
-# watch mode
-$ pnpm run start:dev
+## Cache strategy
 
-# production mode
-$ pnpm run start:prod
+The bot uses an in-memory cache because the app is currently single-process and does not need Redis.
+
+### Why cache TikWM responses
+
+TikWM requests are the slowest part of the flow. Caching the normalized media metadata reduces repeated upstream requests when users resend the same TikTok URL.
+
+### Cache rules
+
+- TTL: 2 hours
+- Maximum cache entries: 1000
+- Cleanup interval: every 15 minutes
+- Expiration strategy: lazy delete on read plus periodic pruning
+
+### Why this matters
+
+- Prevents unbounded memory growth
+- Keeps stale media data from hanging around too long
+- Avoids repeated TikWM requests for duplicate URLs
+- Remains simple enough to swap to Redis later if the app grows
+
+## Project structure
+
+```text
+src/
+  app.module.ts
+  app.controller.ts
+  app.service.ts
+  main.ts
+  bot/
+    bot.module.ts
+    bot.service.ts
+    bot.update.ts
+  download/
+    download.module.ts
+    download.service.ts
+    download.types.ts
+    media-cache.service.ts
+  config/
+    env.validation.ts
 ```
 
-## Run tests
+## Environment variables
+
+Create a local `.env` file or set environment variables before starting the app.
+
+| Variable               | Required | Description                                    |
+| ---------------------- | -------- | ---------------------------------------------- |
+| `TELEGRAM_BOT_API_KEY` | Yes      | Telegram bot token from BotFather              |
+| `PORT`                 | No       | HTTP port for the Nest app, defaults to `3000` |
+
+## Setup
+
+Install dependencies:
 
 ```bash
-# unit tests
-$ pnpm run test
-
-# e2e tests
-$ pnpm run test:e2e
-
-# test coverage
-$ pnpm run test:cov
+pnpm install
 ```
 
-## Deployment
-
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+Run the app in development mode:
 
 ```bash
-$ pnpm install -g @nestjs/mau
-$ mau deploy
+pnpm run dev
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+Build the app:
 
-## Resources
+```bash
+pnpm run build
+```
 
-Check out a few resources that may come in handy when working with NestJS:
+Run tests:
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+```bash
+pnpm run test
+```
 
-## Support
+## How to use the bot
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+1. Start the bot from [Telegram here](https://t.me/shadow_save_bot).
+2. Send `/start`.
+3. Send a public TikTok URL.
+4. Wait for the bot to reply with the video or slideshow.
 
-## Stay in touch
+### Example URLs
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+- `https://vm.tiktok.com/XXXXXXX/`
+- `https://www.tiktok.com/@user/video/1234567890`
+- `https://vt.tiktok.com/XXXXXXX/`
+
+## Notes on slideshow handling
+
+Telegram media groups support a maximum of 10 items per group. For that reason, slideshow images are sent in batches of 10 so larger TikTok albums can still be delivered correctly.
+
+## Error handling
+
+The bot returns a friendly error message when:
+
+- the URL is not a supported TikTok link
+- TikWM returns an error code
+- TikWM cannot be reached
+- the TikTok link is private, expired, or otherwise unavailable
+- Telegram cannot send the final media payload
+
+## Current limitations
+
+- Cache is process-local only
+- Cache is cleared on restart
+- Media URLs returned by TikWM can expire, so cached results are intentionally short-lived
+- The app is optimized for a single bot instance
+
+## Development notes
+
+- The bot handler keeps all Telegram-specific behavior in `BotUpdate`
+- Download and cache logic stays in the download layer
+- Environment validation fails fast at startup if the bot token is missing
+- The app avoids writing temporary media files to disk
+
+## Future improvements
+
+- Add unit tests for cache hit/miss behavior
+- Add tests for slideshow batching
+- Add a small health endpoint or startup log for easier deployment checks
+- Replace the in-memory cache with Redis if the app ever needs horizontal scaling
+- Add richer metadata replies, such as title, author, or music info
 
 ## License
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+MIT
+
+Built with 💜 by aluminate
