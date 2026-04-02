@@ -61,7 +61,10 @@ export class BotUpdate {
       }
 
       if (mediaInfo.videoUrl) {
-        await ctx.replyWithVideo(mediaInfo.videoUrl);
+        await ctx.replyWithVideo(
+          mediaInfo.videoUrl,
+          this.botService.getShareWithFriendsMarkup(),
+        );
         await ctx.telegram.deleteMessage(
           downloadingMessage.chat.id,
           downloadingMessage.message_id,
