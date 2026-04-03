@@ -66,10 +66,28 @@ export class BotUpdate {
       }
 
       if (mediaInfo.videoUrl) {
-        await ctx.replyWithVideo(
-          mediaInfo.videoUrl,
-          this.botService.getShareWithFriendsMarkup(),
-        );
+        const videos = mediaInfo.videoUrls?.length
+          ? mediaInfo.videoUrls
+          : [mediaInfo.videoUrl];
+
+        if (videos.length > 1) {
+          for (let index = 0; index < videos.length; index += 10) {
+            const videoBatch = videos.slice(index, index + 10);
+
+            await ctx.replyWithMediaGroup(
+              videoBatch.map((videoUrl) => ({
+                type: 'video',
+                media: videoUrl,
+              })),
+            );
+          }
+        } else {
+          await ctx.replyWithVideo(
+            videos[0],
+            this.botService.getShareWithFriendsMarkup(),
+          );
+        }
+
         await ctx.telegram.deleteMessage(
           downloadingMessage.chat.id,
           downloadingMessage.message_id,

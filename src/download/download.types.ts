@@ -19,6 +19,7 @@ export type MediaInfo = {
   isSlideshow: boolean;
   title: string;
   videoUrl: string | null;
+  videoUrls: string[] | null;
   images: string[] | null;
   music: string;
   author: string;

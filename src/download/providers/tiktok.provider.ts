@@ -57,6 +57,7 @@ export class TiktokProvider implements SocialMediaProvider {
       isSlideshow,
       title: data.title ?? '',
       videoUrl: isSlideshow ? null : (data.play ?? null),
+      videoUrls: isSlideshow ? null : (data.play ? [data.play] : null),
       images: isSlideshow ? (data?.images ?? []) : null,
       music: data.music ?? '',
       author: data.author?.nickname ?? '',

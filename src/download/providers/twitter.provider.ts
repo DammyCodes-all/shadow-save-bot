@@ -12,7 +12,6 @@ export class TwitterProvider implements SocialMediaProvider {
   readonly platform = 'twitter' as const;
 
   private readonly logger = new Logger(TwitterProvider.name);
-  private readonly maxTelegramVideoSizeBytes = 20 * 1024 * 1024;
 
   private readonly twitterUrlPattern =
     /^(https?:\/\/)?(www\.)?(twitter\.com|x\.com)\/.+/i;
@@ -71,13 +70,14 @@ export class TwitterProvider implements SocialMediaProvider {
       );
     }
 
-    const selectedVideoUrl = this.selectBestVideoUrl(mediaItems);
-    if (selectedVideoUrl) {
+    const selectedVideoUrls = this.selectTopVideoUrls(mediaItems);
+    if (selectedVideoUrls.length > 0) {
       return {
         platform: this.platform,
         isSlideshow: false,
         title: payload.tweet.text ?? '',
-        videoUrl: selectedVideoUrl,
+        videoUrl: selectedVideoUrls[0],
+        videoUrls: selectedVideoUrls,
         images: null,
         music: '',
         author:
@@ -92,6 +92,7 @@ export class TwitterProvider implements SocialMediaProvider {
         isSlideshow: true,
         title: payload.tweet.text ?? '',
         videoUrl: null,
+        videoUrls: null,
         images,
         music: '',
         author:
@@ -110,33 +111,26 @@ export class TwitterProvider implements SocialMediaProvider {
     return match?.[1] ?? null;
   }
 
-  private selectBestVideoUrl(mediaItems: FixTweetMediaItem[]): string | null {
-    const videos = mediaItems.filter((item) => item.type === 'video');
+  private selectTopVideoUrls(mediaItems: FixTweetMediaItem[]): string[] {
+    const variants = mediaItems
+      .filter((item) => item.type === 'video')
+      .flatMap((video) => video.variants ?? [])
+      .filter(
+        (variant): variant is FixTweetVariant & { url: string } =>
+          variant.content_type === 'video/mp4' &&
+          typeof variant.url === 'string',
+      )
+      .sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0));
 
-    for (const video of videos) {
-      const variants = (video.variants ?? [])
-        .filter(
-          (variant) => variant.content_type === 'video/mp4' && !!variant.url,
-        )
-        .sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0));
-
-      const fittingVariant = variants.find(
-        (variant) =>
-          this.getEstimatedSizeBytes(variant, video.duration) <=
-          this.maxTelegramVideoSizeBytes,
-      );
-
-      if (fittingVariant?.url) {
-        return fittingVariant.url;
-      }
-
-      const fallback = variants[variants.length - 1];
-      if (fallback?.url) {
-        return fallback.url;
+    const uniqueUrls = new Set<string>();
+    for (const variant of variants) {
+      uniqueUrls.add(variant.url);
+      if (uniqueUrls.size === 3) {
+        break;
       }
     }
 
-    return null;
+    return Array.from(uniqueUrls);
   }
 
   private collectPhotoUrls(mediaItems: FixTweetMediaItem[]): string[] {
@@ -144,21 +138,5 @@ export class TwitterProvider implements SocialMediaProvider {
       .filter((item) => item.type === 'photo' && typeof item.url === 'string')
       .map((item) => item.url as string)
       .slice(0, 4);
-  }
-
-  private getEstimatedSizeBytes(
-    variant: FixTweetVariant,
-    durationSeconds?: number,
-  ): number {
-    if (typeof variant.size_bytes === 'number' && variant.size_bytes > 0) {
-      return variant.size_bytes;
-    }
-
-    const bitrate = variant.bitrate ?? 0;
-    if (!durationSeconds || durationSeconds <= 0 || bitrate <= 0) {
-      return Number.POSITIVE_INFINITY;
-    }
-
-    return Math.round((bitrate * durationSeconds) / 8);
   }
 }
