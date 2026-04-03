@@ -1,23 +1,31 @@
 import { Injectable } from '@nestjs/common';
- import { ConfigService } from '@nestjs/config';
+import { ConfigService } from '@nestjs/config';
+import type { SocialPlatform } from '../download/providers/social-media-provider.interface';
 
 @Injectable()
 export class BotService {
   constructor(private readonly configService: ConfigService) {}
 
-  private readonly tiktokUrlPattern =
-    /^(https?:\/\/)?(www\.)?(vm\.|vt\.)?tiktok\.com\/.+/i;
-
   getWelcomeMessage(): string {
-    return "Hi there! Welcome to Shadow Save Bot.\n\nSend me a TikTok link and I'll help you download the video in just a moment.\n\nExample:\nhttps://vm.tiktok.com/XXXXXXX/";
+    return "Hi there! Welcome to Shadow Save Bot.\n\nSend a supported social media link and I'll try to fetch the media for you.\n\nCurrently best supported: TikTok\nTwitter/X support is being integrated.\n\nExample:\nhttps://vm.tiktok.com/XXXXXXX/";
   }
 
-  isTikTokUrl(text: string): boolean {
-    return this.tiktokUrlPattern.test(text.trim());
+  getUnsupportedLinkMessage(supportedPlatforms: SocialPlatform[]): string {
+    const supported = this.getPlatformDisplayText(supportedPlatforms);
+
+    return `Unsupported link.\n\nSupported platforms: ${supported}\n\nExample:\nhttps://vm.tiktok.com/XXXXXXX/`;
   }
 
-  getUnsupportedLinkMessage(): string {
-    return 'Incorrect Tik Tok link.\n\nTo download the video, send the link in the format:\nhttps://vm.tiktok.com/XXXXXXX/';
+  getNotImplementedMessage(platform: SocialPlatform): string {
+    if (platform === 'twitter') {
+      return 'Twitter/X support is coming soon. Please send a TikTok link for now.';
+    }
+
+    return `${this.getPlatformName(platform)} support is coming soon.`;
+  }
+
+  getDownloadFailureMessage(platform: SocialPlatform): string {
+    return `❌ Failed to download. Make sure it's a valid public ${this.getPlatformName(platform)} link.`;
   }
 
   getDownloadQueuedMessage(url: string): string {
@@ -39,5 +47,21 @@ export class BotService {
         ],
       },
     };
+  }
+
+  private getPlatformDisplayText(platforms: SocialPlatform[]): string {
+    return platforms.map((platform) => this.getPlatformName(platform)).join(', ');
+  }
+
+  private getPlatformName(platform: SocialPlatform): string {
+    if (platform === 'tiktok') {
+      return 'TikTok';
+    }
+
+    if (platform === 'twitter') {
+      return 'Twitter/X';
+    }
+
+    return platform;
   }
 }

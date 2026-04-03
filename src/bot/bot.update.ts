@@ -26,9 +26,14 @@ export class BotUpdate {
     }
 
     const url = message.text.trim();
+    const platform = this.downloadService.detectPlatform(url);
 
-    if (!this.botService.isTikTokUrl(url)) {
-      await ctx.reply(this.botService.getUnsupportedLinkMessage());
+    if (!platform) {
+      await ctx.reply(
+        this.botService.getUnsupportedLinkMessage(
+          this.downloadService.getSupportedPlatforms(),
+        ),
+      );
       return;
     }
 
@@ -72,16 +77,14 @@ export class BotUpdate {
         return;
       }
 
-      await ctx.reply(
-        "❌ Failed to download. Make sure it's a valid public TikTok link.",
-      );
+      await ctx.reply(this.botService.getDownloadFailureMessage(platform));
       try {
         await ctx.telegram.deleteMessage(
           downloadingMessage.chat.id,
           downloadingMessage.message_id,
         );
       } catch {}
-    } catch {
+    } catch (error: unknown) {
       try {
         await ctx.telegram.deleteMessage(
           downloadingMessage.chat.id,
@@ -89,9 +92,24 @@ export class BotUpdate {
         );
       } catch {}
 
-      await ctx.reply(
-        "❌ Failed to download. Make sure it's a valid public TikTok link.",
-      );
+      if (this.isNotImplementedError(error)) {
+        await ctx.reply(this.botService.getNotImplementedMessage(platform));
+        return;
+      }
+
+      await ctx.reply(this.botService.getDownloadFailureMessage(platform));
     }
+  }
+
+  private isNotImplementedError(error: unknown): boolean {
+    if (!error || typeof error !== 'object') {
+      return false;
+    }
+
+    if (!('getStatus' in error) || typeof error.getStatus !== 'function') {
+      return false;
+    }
+
+    return error.getStatus() === 501;
   }
 }

@@ -1,3 +1,5 @@
+import type { SocialPlatform } from './providers/social-media-provider.interface';
+
 export type TikwmResponse = {
   code: number;
   msg?: string;
@@ -13,6 +15,7 @@ export type TikwmResponse = {
 };
 
 export type MediaInfo = {
+  platform: SocialPlatform;
   isSlideshow: boolean;
   title: string;
   videoUrl: string | null;

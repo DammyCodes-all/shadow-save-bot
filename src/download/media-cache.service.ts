@@ -1,6 +1,7 @@
 import { Inject, Injectable, OnModuleDestroy } from '@nestjs/common';
 import { CACHE_MANAGER, Cache } from '@nestjs/cache-manager';
 import type { MediaInfo } from './download.types';
+import type { SocialPlatform } from './providers/social-media-provider.interface';
 
 type CacheEntry = {
   insertedAt: number;
@@ -24,8 +25,8 @@ export class MediaCacheService implements OnModuleDestroy {
     this.cleanupTimer.unref();
   }
 
-  async get(url: string): Promise<MediaInfo | null> {
-    const key = this.getKey(url);
+  async get(platform: SocialPlatform, url: string): Promise<MediaInfo | null> {
+    const key = this.getKey(platform, url);
     const cached = await this.cacheManager.get<MediaInfo>(key);
 
     if (!cached) {
@@ -37,8 +38,8 @@ export class MediaCacheService implements OnModuleDestroy {
     return cached;
   }
 
-  async set(url: string, value: MediaInfo): Promise<void> {
-    const key = this.getKey(url);
+  async set(platform: SocialPlatform, url: string, value: MediaInfo): Promise<void> {
+    const key = this.getKey(platform, url);
     await this.cacheManager.set(key, value, this.ttlMs);
     this.cacheKeys.set(key, { insertedAt: Date.now() });
     await this.prune();
@@ -50,8 +51,8 @@ export class MediaCacheService implements OnModuleDestroy {
     this.cacheKeys.clear();
   }
 
-  private getKey(url: string): string {
-    return `media:${url.trim()}`;
+  private getKey(platform: SocialPlatform, url: string): string {
+    return `media:${platform}:${url.trim()}`;
   }
 
   private async prune(): Promise<void> {

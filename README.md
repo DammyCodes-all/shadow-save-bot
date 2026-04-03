@@ -2,23 +2,24 @@
 
 Built with 💜 by aluminate
 
-Shadow Save Bot is a NestJS Telegram bot that downloads TikTok media and sends it directly back to the user without saving files to disk.
+Shadow Save Bot is a NestJS Telegram bot that is being structured for multi-social media downloads and currently handles TikTok media end-to-end, while preparing Twitter/X integration.
 
 It uses:
 
 - NestJS for application structure and dependency injection
 - `nestjs-telegraf` for Telegram bot integration
+- Provider-based social media integration (extensible by platform)
 - TikWM for TikTok media extraction
 - `cache-manager` for in-memory caching with automatic expiration
 - Telegram media groups for slideshow responses
 
 ## What it does
 
-The bot accepts a TikTok URL in Telegram and responds in one of three ways:
+The bot accepts supported social media URLs in Telegram and responds in one of three ways:
 
 - If the link is valid and points to a video, it sends the video back to the chat.
 - If the link is a slideshow, it sends the images as Telegram media groups.
-- If the link is invalid or TikWM fails, it replies with a friendly error message.
+- If the link is unsupported or provider processing fails, it replies with a friendly error message.
 
 The app does not write downloaded media to disk.
 
@@ -26,28 +27,30 @@ The app does not write downloaded media to disk.
 
 - Telegram bot built with NestJS
 - `@start` welcome message
-- TikTok URL validation
+- Platform-aware URL validation via provider matching
 - TikWM metadata lookup
 - Direct video streaming to Telegram
 - Slideshow support with batched media groups
 - In-memory cache for TikWM results
+- Provider registry to support multiple social media backends
+- Twitter/X provider scaffold (URL detection + coming soon response)
 - Auto-expiring cache cleanup to avoid memory growth
 - Friendly error handling for invalid or private links
 - A "Share with friends" button that shares the bot itself after successful video downloads
 
 ## Architecture
 
-The app is organized by feature and keeps the Telegram layer separate from the TikTok download layer.
+The app is organized by feature and keeps the Telegram layer separate from the provider-driven download layer.
 
 ### High-level flow
 
 1. The user sends a text message in Telegram.
-2. `BotUpdate` validates that the message looks like a TikTok URL.
+2. `BotUpdate` asks `DownloadService` to detect the matching provider from the URL.
 3. The bot replies with `⏳ Downloading...`.
-4. `DownloadService` looks up the media information from TikWM.
+4. `DownloadService` delegates media lookup to the matched provider.
 5. `MediaCacheService` returns a cached result when possible.
-6. If TikWM returns a slideshow, the bot sends the images in groups of 10.
-7. If TikWM returns a video, the bot sends the video URL directly.
+6. If the provider returns a slideshow, the bot sends the images in groups of 10.
+7. If the provider returns a video, the bot sends the video URL directly.
 8. On successful video downloads, the bot adds a "Share with friends" button that opens the bot invite link.
 9. The temporary downloading message is deleted after the media is sent.
 
@@ -72,19 +75,27 @@ Telegram integration module.
 
 #### `DownloadModule`
 
-Media lookup and cache module.
+Provider-based media lookup and cache module.
 
 - Provides `DownloadService`
 - Provides `MediaCacheService`
+- Registers platform providers (`TiktokProvider`, `TwitterProvider`)
 - Registers `CacheModule` in memory with TTL support
 
 #### `DownloadService`
 
-Responsible for talking to TikWM.
+Provider orchestrator for media fetching.
 
-- Fetches media metadata with native `fetch`
-- Converts the TikWM response into a strict `MediaInfo` shape
+- Resolves which provider can handle an incoming URL
+- Delegates media fetch to the selected provider
 - Caches successful responses through `MediaCacheService`
+- Exposes supported platforms and URL platform detection for the bot layer
+
+#### Providers (`src/download/providers`)
+
+- `SocialMediaProvider` interface defines a platform contract
+- `TiktokProvider` contains TikWM-specific logic and response mapping
+- `TwitterProvider` currently matches Twitter/X URLs and returns a not-implemented response
 
 #### `MediaCacheService`
 
@@ -113,6 +124,7 @@ Telegram update handler.
 
 ```ts
 {
+  platform: 'tiktok' | 'twitter';
   isSlideshow: boolean;
   title: string;
   videoUrl: string | null;
@@ -168,6 +180,11 @@ src/
     download.service.ts
     download.types.ts
     media-cache.service.ts
+    providers/
+      provider.constants.ts
+      social-media-provider.interface.ts
+      tiktok.provider.ts
+      twitter.provider.ts
   config/
     env.validation.ts
 ```
@@ -176,11 +193,11 @@ src/
 
 Create a local `.env` file or set environment variables before starting the app.
 
-| Variable               | Required | Description                                    |
-| ---------------------- | -------- | ---------------------------------------------- |
-| `TELEGRAM_BOT_API_KEY` | Yes      | Telegram bot token from BotFather              |
-| `TELEGRAM_BOT_USERNAME`| Yes      | Bot username used for the share button invite   |
-| `PORT`                 | No       | HTTP port for the Nest app, defaults to `3000` |
+| Variable                | Required | Description                                    |
+| ----------------------- | -------- | ---------------------------------------------- |
+| `TELEGRAM_BOT_API_KEY`  | Yes      | Telegram bot token from BotFather              |
+| `TELEGRAM_BOT_USERNAME` | Yes      | Bot username used for the share button invite  |
+| `PORT`                  | No       | HTTP port for the Nest app, defaults to `3000` |
 
 ## Setup
 
@@ -229,10 +246,10 @@ Telegram media groups support a maximum of 10 items per group. For that reason, 
 
 The bot returns a friendly error message when:
 
-- the URL is not a supported TikTok link
-- TikWM returns an error code
-- TikWM cannot be reached
-- the TikTok link is private, expired, or otherwise unavailable
+- the URL is not a supported platform link
+- provider returns an error code
+- provider backend cannot be reached
+- the source link is private, expired, or otherwise unavailable
 - Telegram cannot send the final media payload
 
 ## Current limitations
@@ -241,6 +258,7 @@ The bot returns a friendly error message when:
 - Cache is cleared on restart
 - Media URLs returned by TikWM can expire, so cached results are intentionally short-lived
 - The app is optimized for a single bot instance
+- Twitter/X provider is scaffolded but media extraction is not implemented yet
 
 ## Development notes
 
