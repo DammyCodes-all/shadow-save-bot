@@ -70,14 +70,14 @@ export class TwitterProvider implements SocialMediaProvider {
       );
     }
 
-    const selectedVideoUrls = this.selectTopVideoUrls(mediaItems);
-    if (selectedVideoUrls.length > 0) {
+    const selectedVideoUrl = this.selectHighestQualityVideoUrl(mediaItems);
+    if (selectedVideoUrl) {
       return {
         platform: this.platform,
         isSlideshow: false,
         title: payload.tweet.text ?? '',
-        videoUrl: selectedVideoUrls[0],
-        videoUrls: selectedVideoUrls,
+        videoUrl: selectedVideoUrl,
+        videoUrls: null,
         images: null,
         music: '',
         author:
@@ -111,7 +111,9 @@ export class TwitterProvider implements SocialMediaProvider {
     return match?.[1] ?? null;
   }
 
-  private selectTopVideoUrls(mediaItems: FixTweetMediaItem[]): string[] {
+  private selectHighestQualityVideoUrl(
+    mediaItems: FixTweetMediaItem[],
+  ): string | null {
     const variants = mediaItems
       .filter((item) => item.type === 'video')
       .flatMap((video) => video.variants ?? [])
@@ -122,15 +124,7 @@ export class TwitterProvider implements SocialMediaProvider {
       )
       .sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0));
 
-    const uniqueUrls = new Set<string>();
-    for (const variant of variants) {
-      uniqueUrls.add(variant.url);
-      if (uniqueUrls.size === 3) {
-        break;
-      }
-    }
-
-    return Array.from(uniqueUrls);
+    return variants[0]?.url ?? null;
   }
 
   private collectPhotoUrls(mediaItems: FixTweetMediaItem[]): string[] {
