@@ -7,7 +7,7 @@ export class BotService {
   constructor(private readonly configService: ConfigService) {}
 
   getWelcomeMessage(): string {
-    return "Hi there! Welcome to Shadow Save Bot.\n\nSend a supported social media link and I'll try to fetch the media for you.\n\nCurrently best supported: TikTok\nTwitter/X support is being integrated.\n\nExample:\nhttps://vm.tiktok.com/XXXXXXX/";
+    return "Hi there! Welcome to Shadow Save Bot.\n\nSend a supported social media link and I'll try to fetch the media for you.\n\nCurrently best supported: TikTok\nTwitter/X support is integrated.\n\nExample:\nhttps://vm.tiktok.com/XXXXXXX/";
   }
 
   getUnsupportedLinkMessage(supportedPlatforms: SocialPlatform[]): string {
@@ -33,7 +33,9 @@ export class BotService {
   }
 
   getShareWithFriendsMarkup() {
-    const botUsername = this.configService.getOrThrow<string>('TELEGRAM_BOT_USERNAME');
+    const botUsername = this.configService.getOrThrow<string>(
+      'TELEGRAM_BOT_USERNAME',
+    );
 
     return {
       reply_markup: {
@@ -50,7 +52,9 @@ export class BotService {
   }
 
   private getPlatformDisplayText(platforms: SocialPlatform[]): string {
-    return platforms.map((platform) => this.getPlatformName(platform)).join(', ');
+    return platforms
+      .map((platform) => this.getPlatformName(platform))
+      .join(', ');
   }
 
   private getPlatformName(platform: SocialPlatform): string {
