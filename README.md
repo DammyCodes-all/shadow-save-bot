@@ -2,7 +2,7 @@
 
 Built with 💜 by aluminate
 
-Shadow Save Bot is a NestJS Telegram bot that is being structured for multi-social media downloads and currently handles TikTok media end-to-end, while preparing Twitter/X integration.
+Shadow Save Bot is a NestJS Telegram bot with provider-based multi-social media support. It currently supports TikTok and Twitter/X media extraction and sends content directly in Telegram without saving files to disk.
 
 It uses:
 
@@ -10,6 +10,7 @@ It uses:
 - `nestjs-telegraf` for Telegram bot integration
 - Provider-based social media integration (extensible by platform)
 - TikWM for TikTok media extraction
+- FixTweet API for Twitter/X media extraction
 - `cache-manager` for in-memory caching with automatic expiration
 - Telegram media groups for slideshow responses
 
@@ -18,6 +19,7 @@ It uses:
 The bot accepts supported social media URLs in Telegram and responds in one of three ways:
 
 - If the link is valid and points to a video, it sends the video back to the chat.
+- For Twitter/X videos, it can send up to the top 3 highest-quality MP4 variants in one response flow.
 - If the link is a slideshow, it sends the images as Telegram media groups.
 - If the link is unsupported or provider processing fails, it replies with a friendly error message.
 
@@ -29,11 +31,12 @@ The app does not write downloaded media to disk.
 - `@start` welcome message
 - Platform-aware URL validation via provider matching
 - TikWM metadata lookup
-- Direct video streaming to Telegram
+- Direct video streaming to Telegram (single or multi-video)
 - Slideshow support with batched media groups
 - In-memory cache for TikWM results
 - Provider registry to support multiple social media backends
-- Twitter/X provider scaffold (URL detection + coming soon response)
+- Twitter/X provider implementation using FixTweet status endpoint
+- Top 3 MP4 Twitter/X variant selection by bitrate
 - Auto-expiring cache cleanup to avoid memory growth
 - Friendly error handling for invalid or private links
 - A "Share with friends" button that shares the bot itself after successful video downloads
@@ -50,7 +53,7 @@ The app is organized by feature and keeps the Telegram layer separate from the p
 4. `DownloadService` delegates media lookup to the matched provider.
 5. `MediaCacheService` returns a cached result when possible.
 6. If the provider returns a slideshow, the bot sends the images in groups of 10.
-7. If the provider returns a video, the bot sends the video URL directly.
+7. If the provider returns videos, the bot sends one or many video URLs depending on the result payload.
 8. On successful video downloads, the bot adds a "Share with friends" button that opens the bot invite link.
 9. The temporary downloading message is deleted after the media is sent.
 
@@ -95,7 +98,7 @@ Provider orchestrator for media fetching.
 
 - `SocialMediaProvider` interface defines a platform contract
 - `TiktokProvider` contains TikWM-specific logic and response mapping
-- `TwitterProvider` currently matches Twitter/X URLs and returns a not-implemented response
+- `TwitterProvider` extracts tweet media from FixTweet and maps videos/photos into the shared `MediaInfo` model
 
 #### `MediaCacheService`
 
@@ -128,6 +131,7 @@ Telegram update handler.
   isSlideshow: boolean;
   title: string;
   videoUrl: string | null;
+  videoUrls: string[] | null;
   images: string[] | null;
   music: string;
   author: string;
@@ -138,8 +142,19 @@ Telegram update handler.
 
 - `isSlideshow` is `true` when `data.images` exists and has items
 - `videoUrl` is used for normal videos
+- `videoUrls` can include multiple provider-returned video URLs (for example, top Twitter/X MP4 variants)
 - `images` is used for slideshow posts
 - `music` and `author` are kept for future metadata handling
+
+### Twitter/X result behavior
+
+- The provider extracts the tweet id and calls `https://api.fxtwitter.com/status/{tweetId}`
+- Reads media from `tweet.media.all`
+- For videos, filters variants to `content_type = video/mp4`
+- Sorts MP4 variants by bitrate descending
+- Returns up to top 3 unique URLs in `videoUrls`
+- If no compatible videos exist, returns photo URLs (up to 4) as slideshow media
+- Logs a warning when the API returns code `200` but media is empty (possible sensitive-content case)
 
 ## Cache strategy
 
@@ -185,6 +200,7 @@ src/
       social-media-provider.interface.ts
       tiktok.provider.ts
       twitter.provider.ts
+      twitter.types.ts
   config/
     env.validation.ts
 ```
@@ -237,6 +253,8 @@ pnpm run test
 - `https://vm.tiktok.com/XXXXXXX/`
 - `https://www.tiktok.com/@user/video/1234567890`
 - `https://vt.tiktok.com/XXXXXXX/`
+- `https://x.com/<username>/status/<tweetId>`
+- `https://twitter.com/<username>/status/<tweetId>`
 
 ## Notes on slideshow handling
 
@@ -258,7 +276,6 @@ The bot returns a friendly error message when:
 - Cache is cleared on restart
 - Media URLs returned by TikWM can expire, so cached results are intentionally short-lived
 - The app is optimized for a single bot instance
-- Twitter/X provider is scaffolded but media extraction is not implemented yet
 
 ## Development notes
 
