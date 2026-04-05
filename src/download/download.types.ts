@@ -27,12 +27,10 @@ export type MediaInfo = {
 
 export type InstagramMediaDetails = {
   type: 'video' | 'image';
-  dimensions:
-    | {
-        height: string;
-        width: string;
-      }
-    | Record<string, unknown>;
+  dimensions: {
+    height: string;
+    width: string;
+  };
   video_view_count: number;
   url: string;
   thumbnail: string;

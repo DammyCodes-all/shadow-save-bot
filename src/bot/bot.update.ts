@@ -42,20 +42,27 @@ export class BotUpdate {
     try {
       const mediaInfo = await this.downloadService.getMediaInfo(url);
 
-      if (
-        mediaInfo.isSlideshow &&
-        mediaInfo.images &&
-        mediaInfo.images.length > 0
-      ) {
-        for (let index = 0; index < mediaInfo.images.length; index += 10) {
-          const imageBatch = mediaInfo.images.slice(index, index + 10);
-
-          await ctx.replyWithMediaGroup(
-            imageBatch.map((imageUrl) => ({
-              type: 'photo',
-              media: imageUrl,
-            })),
+      if (mediaInfo.images && mediaInfo.images.length > 0) {
+        if (mediaInfo.images.length === 1) {
+          await ctx.replyWithPhoto(
+            mediaInfo.images[0],
+            this.botService.getShareWithFriendsMarkup(),
           );
+        } else {
+          for (let index = 0; index < mediaInfo.images.length; index += 10) {
+            const imageBatch = mediaInfo.images.slice(index, index + 10);
+
+            if (imageBatch.length === 1) {
+              await ctx.replyWithPhoto(imageBatch[0]);
+            } else {
+              await ctx.replyWithMediaGroup(
+                imageBatch.map((imageUrl) => ({
+                  type: 'photo',
+                  media: imageUrl,
+                })),
+              );
+            }
+          }
         }
 
         await ctx.telegram.deleteMessage(
