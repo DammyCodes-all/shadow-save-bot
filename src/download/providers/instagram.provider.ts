@@ -109,6 +109,7 @@ export class InstagramProvider implements SocialMediaProvider {
           is_private: data.owner?.is_private || false,
           likes: data.likes || 0,
           is_ad: data.is_ad || false,
+          caption: data.caption || undefined,
         },
         url_list: this.extractMediaUrls(data),
         media_details: mediaDetails,
@@ -135,11 +136,15 @@ export class InstagramProvider implements SocialMediaProvider {
     }
 
     return data.resources.map((resource) => ({
-      type: resource.type === 'video' ? 'video' : 'image',
-      dimensions: {
-        height: String(resource.height || 0),
-        width: String(resource.width || 0),
-      },
+      type: (resource.type === 'video' ? 'video' : 'image') as 'video' | 'image',
+      dimensions:
+        typeof resource.height === 'number' &&
+        typeof resource.width === 'number'
+          ? {
+              height: String(resource.height),
+              width: String(resource.width),
+            }
+          : { height: '0', width: '0' },
       video_view_count: resource.video_view_count || 0,
       url: resource.src || '',
       thumbnail: resource.preview || resource.src || '',

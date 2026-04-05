@@ -27,10 +27,12 @@ export type MediaInfo = {
 
 export type InstagramMediaDetails = {
   type: 'video' | 'image';
-  dimensions: {
-    height: string;
-    width: string;
-  };
+  dimensions:
+    | {
+        height: string;
+        width: string;
+      }
+    | Record<string, unknown>;
   video_view_count: number;
   url: string;
   thumbnail: string;
@@ -43,6 +45,7 @@ export type InstagramPostInfo = {
   is_private: boolean;
   likes: number;
   is_ad: boolean;
+  caption?: string;
 };
 
 export type InstagramResponse = {
