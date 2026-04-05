@@ -42,7 +42,7 @@ export class BotService {
         inline_keyboard: [
           [
             {
-              text: 'Share with friends',
+              text: 'Share bot with friends',
               url: `https://t.me/share/url?url=${encodeURIComponent(`https://t.me/${botUsername}`)}&text=${encodeURIComponent('Check out this bot for downloading TikTok videos and slideshows!')}`,
             },
           ],

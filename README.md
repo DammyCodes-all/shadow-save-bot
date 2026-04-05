@@ -2,7 +2,7 @@
 
 Built with 💜 by aluminate
 
-Shadow Save Bot is a NestJS Telegram bot with provider-based multi-social media support. It currently supports TikTok and Twitter/X media extraction and sends content directly in Telegram without saving files to disk.
+Shadow Save Bot is a NestJS Telegram bot with provider-based multi-social media support. It currently supports TikTok, Twitter/X, and Instagram media extraction and sends content directly in Telegram without saving files to disk.
 
 It uses:
 
@@ -11,6 +11,7 @@ It uses:
 - Provider-based social media integration (extensible by platform)
 - TikWM for TikTok media extraction
 - FixTweet API for Twitter/X media extraction
+- `instagram-url-direct` for Instagram media extraction
 - `cache-manager` for in-memory caching with automatic expiration
 - Telegram media groups for slideshow responses
 
@@ -37,6 +38,8 @@ The app does not write downloaded media to disk.
 - Provider registry to support multiple social media backends
 - Twitter/X provider implementation using FixTweet status endpoint
 - Top 3 MP4 Twitter/X variant selection by bitrate
+- Instagram provider implementation with response normalization (`resources` payload and normalized `url_list/media_details` payload)
+- URL-first extraction fallback for Instagram media delivery
 - Auto-expiring cache cleanup to avoid memory growth
 - Friendly error handling for invalid or private links
 - A "Share with friends" button that shares the bot itself after successful video downloads
@@ -82,7 +85,7 @@ Provider-based media lookup and cache module.
 
 - Provides `DownloadService`
 - Provides `MediaCacheService`
-- Registers platform providers (`TiktokProvider`, `TwitterProvider`)
+- Registers platform providers (`TiktokProvider`, `TwitterProvider`, `InstagramProvider`)
 - Registers `CacheModule` in memory with TTL support
 
 #### `DownloadService`
@@ -99,6 +102,7 @@ Provider orchestrator for media fetching.
 - `SocialMediaProvider` interface defines a platform contract
 - `TiktokProvider` contains TikWM-specific logic and response mapping
 - `TwitterProvider` extracts tweet media from FixTweet and maps videos/photos into the shared `MediaInfo` model
+- `InstagramProvider` extracts post/reel media with `instagram-url-direct` and normalizes output into the shared `MediaInfo` model
 
 #### `MediaCacheService`
 
@@ -127,7 +131,7 @@ Telegram update handler.
 
 ```ts
 {
-  platform: 'tiktok' | 'twitter';
+  platform: 'tiktok' | 'twitter' | 'instagram';
   isSlideshow: boolean;
   title: string;
   videoUrl: string | null;
@@ -155,6 +159,21 @@ Telegram update handler.
 - Returns up to top 3 unique URLs in `videoUrls`
 - If no compatible videos exist, returns photo URLs (up to 4) as slideshow media
 - Logs a warning when the API returns code `200` but media is empty (possible sensitive-content case)
+
+### Instagram result behavior
+
+- Calls `instagramGetUrl(url)` from `instagram-url-direct`
+- Accepts two payload variants:
+  - raw package payload (`resources`, `owner`, `caption`)
+  - normalized payload (`results_number`, `post_info`, `url_list`, `media_details`)
+- Normalizes both variants to a common `InstagramResponse` shape before mapping to `MediaInfo`
+- Extracts videos from `media_details` when `type = video`
+- Falls back to URL pattern detection (`.mp4`, `.m3u8`, image extensions) from `url_list` if type metadata is missing
+- Uses first available URL as a safety fallback when media metadata is incomplete
+- Returns:
+  - `videoUrl/videoUrls` for videos
+  - `images` for image-only posts
+  - `title` from caption and `author` from owner username
 
 ## Cache strategy
 
@@ -200,6 +219,7 @@ src/
       social-media-provider.interface.ts
       tiktok.provider.ts
       twitter.provider.ts
+      instagram.provider.ts
       twitter.types.ts
   config/
     env.validation.ts
@@ -245,7 +265,7 @@ pnpm run test
 
 1. Start the bot from [Telegram here](https://t.me/shadow_save_bot).
 2. Send `/start`.
-3. Send a public TikTok URL.
+3. Send a public TikTok, Twitter/X, or Instagram URL.
 4. Wait for the bot to reply with the video or slideshow.
 
 ### Example URLs
@@ -255,6 +275,8 @@ pnpm run test
 - `https://vt.tiktok.com/XXXXXXX/`
 - `https://x.com/<username>/status/<tweetId>`
 - `https://twitter.com/<username>/status/<tweetId>`
+- `https://www.instagram.com/reel/<shortcode>/`
+- `https://www.instagram.com/p/<shortcode>/`
 
 ## Notes on slideshow handling
 
