@@ -188,7 +188,9 @@ export class InstagramProvider implements SocialMediaProvider {
     );
   }
 
-  private isRawResponse(payload: unknown): payload is InstagramUrlDirectRawResponse {
+  private isRawResponse(
+    payload: unknown,
+  ): payload is InstagramUrlDirectRawResponse {
     if (!this.isRecord(payload)) {
       return false;
     }
@@ -201,7 +203,10 @@ export class InstagramProvider implements SocialMediaProvider {
       return false;
     }
 
-    if (!Array.isArray(payload.url_list) || !Array.isArray(payload.media_details)) {
+    if (
+      !Array.isArray(payload.url_list) ||
+      !Array.isArray(payload.media_details)
+    ) {
       return false;
     }
 
