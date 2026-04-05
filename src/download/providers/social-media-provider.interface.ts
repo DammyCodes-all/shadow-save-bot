@@ -1,6 +1,6 @@
 import type { MediaInfo } from '../download.types';
 
-export type SocialPlatform = 'tiktok' | 'twitter';
+export type SocialPlatform = 'tiktok' | 'twitter' | 'instagram';
 
 export interface SocialMediaProvider {
   readonly platform: SocialPlatform;

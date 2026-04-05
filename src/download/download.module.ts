@@ -4,6 +4,7 @@ import { DownloadService } from './download.service';
 import { MediaCacheService } from './media-cache.service.js';
 import { TiktokProvider } from './providers/tiktok.provider';
 import { TwitterProvider } from './providers/twitter.provider';
+import { InstagramProvider } from './providers/instagram.provider';
 import { SOCIAL_MEDIA_PROVIDERS } from './providers/provider.constants';
 
 @Module({
@@ -18,13 +19,15 @@ import { SOCIAL_MEDIA_PROVIDERS } from './providers/provider.constants';
     MediaCacheService,
     TiktokProvider,
     TwitterProvider,
+    InstagramProvider,
     {
       provide: SOCIAL_MEDIA_PROVIDERS,
       useFactory: (
         tiktokProvider: TiktokProvider,
         twitterProvider: TwitterProvider,
-      ) => [tiktokProvider, twitterProvider],
-      inject: [TiktokProvider, TwitterProvider],
+        instagramProvider: InstagramProvider,
+      ) => [tiktokProvider, twitterProvider, instagramProvider],
+      inject: [TiktokProvider, TwitterProvider, InstagramProvider],
     },
   ],
   exports: [DownloadService],

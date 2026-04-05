@@ -26,6 +26,7 @@
     "@nestjs/core": "^11.0.1",
     "@nestjs/platform-express": "^11.0.1",
     "cache-manager": "^7.2.8",
+    "instagram-url-direct": "^2.0.7",
     "nestjs-telegraf": "^2.9.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
