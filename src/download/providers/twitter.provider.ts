@@ -160,23 +160,13 @@ export class TwitterProvider implements SocialMediaProvider {
           variant.content_type === 'video/mp4' &&
           typeof variant.url === 'string',
       )
-      .sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0));
+      .sort((a, b) => {
+        const bitrateA = a.bitrate ?? -1;
+        const bitrateB = b.bitrate ?? -1;
+        return bitrateB - bitrateA;
+      });
 
-    const dedupedUrls = Array.from(
-      new Set(variants.map((variant) => variant.url)),
-    );
-
-    if (dedupedUrls.length === 0) {
-      return [];
-    }
-
-    const preferredCeilingBitrate = 10_000_000;
-    const preferred = variants
-      .filter((variant) => (variant.bitrate ?? 0) <= preferredCeilingBitrate)
-      .map((variant) => variant.url);
-    const dedupedPreferred = Array.from(new Set(preferred));
-
-    return dedupedPreferred.length > 0 ? dedupedPreferred : dedupedUrls;
+    return Array.from(new Set(variants.map((variant) => variant.url)));
   }
 
   private formatsToVariants(formats?: FixTweetFormat[]): FixTweetVariant[] {

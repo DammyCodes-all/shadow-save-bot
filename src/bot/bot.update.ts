@@ -77,7 +77,7 @@ export class BotUpdate {
           ? mediaInfo.videoUrls
           : [mediaInfo.videoUrl];
 
-        if (videos.length > 1) {
+        if (mediaInfo.platform === 'twitter' && videos.length > 1) {
           let sent = false;
 
           for (const videoUrl of videos) {
@@ -93,6 +93,17 @@ export class BotUpdate {
 
           if (!sent) {
             throw new Error('Failed to send all available video variants');
+          }
+        } else if (videos.length > 1) {
+          for (let index = 0; index < videos.length; index += 10) {
+            const videoBatch = videos.slice(index, index + 10);
+
+            await ctx.replyWithMediaGroup(
+              videoBatch.map((videoUrl) => ({
+                type: 'video',
+                media: videoUrl,
+              })),
+            );
           }
         } else {
           await ctx.replyWithVideo(
