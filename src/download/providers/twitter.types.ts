@@ -5,12 +5,20 @@ export type FixTweetVariant = {
   size_bytes?: number;
 };
 
+export type FixTweetFormat = {
+  url?: string;
+  bitrate?: number;
+  container?: string;
+  codec?: string;
+};
+
 export type FixTweetMediaItem = {
   id?: string;
   url?: string;
   type?: 'video' | 'photo' | string;
   duration?: number;
   variants?: FixTweetVariant[];
+  formats?: FixTweetFormat[];
 };
 
 export type FixTweetTweet = {
@@ -22,6 +30,8 @@ export type FixTweetTweet = {
   };
   media?: {
     all?: FixTweetMediaItem[];
+    videos?: FixTweetMediaItem[];
+    photos?: FixTweetMediaItem[];
   };
 };
 

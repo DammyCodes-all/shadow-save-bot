@@ -78,15 +78,21 @@ export class BotUpdate {
           : [mediaInfo.videoUrl];
 
         if (videos.length > 1) {
-          for (let index = 0; index < videos.length; index += 10) {
-            const videoBatch = videos.slice(index, index + 10);
+          let sent = false;
 
-            await ctx.replyWithMediaGroup(
-              videoBatch.map((videoUrl) => ({
-                type: 'video',
-                media: videoUrl,
-              })),
-            );
+          for (const videoUrl of videos) {
+            try {
+              await ctx.replyWithVideo(
+                videoUrl,
+                this.botService.getShareWithFriendsMarkup(),
+              );
+              sent = true;
+              break;
+            } catch {}
+          }
+
+          if (!sent) {
+            throw new Error('Failed to send all available video variants');
           }
         } else {
           await ctx.replyWithVideo(

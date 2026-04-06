@@ -2,6 +2,7 @@ import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import type { MediaInfo } from '../download.types';
 import type { SocialMediaProvider } from './social-media-provider.interface';
 import type {
+  FixTweetFormat,
   FixTweetMediaItem,
   FixTweetResponse,
   FixTweetVariant,
@@ -58,7 +59,7 @@ export class TwitterProvider implements SocialMediaProvider {
       );
     }
 
-    const mediaItems = payload.tweet.media?.all ?? [];
+    const mediaItems = this.extractMediaItems(payload);
 
     if (mediaItems.length === 0) {
       this.logger.warn(
@@ -70,14 +71,14 @@ export class TwitterProvider implements SocialMediaProvider {
       );
     }
 
-    const selectedVideoUrl = this.selectHighestQualityVideoUrl(mediaItems);
-    if (selectedVideoUrl) {
+    const candidateVideoUrls = this.selectVideoUrlsByQuality(mediaItems);
+    if (candidateVideoUrls.length > 0) {
       return {
         platform: this.platform,
         isSlideshow: false,
         title: payload.tweet.text ?? '',
-        videoUrl: selectedVideoUrl,
-        videoUrls: null,
+        videoUrl: candidateVideoUrls[0],
+        videoUrls: candidateVideoUrls,
         images: null,
         music: '',
         author:
@@ -111,12 +112,49 @@ export class TwitterProvider implements SocialMediaProvider {
     return match?.[1] ?? null;
   }
 
-  private selectHighestQualityVideoUrl(
-    mediaItems: FixTweetMediaItem[],
-  ): string | null {
+  private extractMediaItems(payload: FixTweetResponse): FixTweetMediaItem[] {
+    const media = payload.tweet?.media;
+
+    if (!media) {
+      return [];
+    }
+
+    const combined = [
+      ...(media.all ?? []),
+      ...(media.videos ?? []),
+      ...(media.photos ?? []),
+    ];
+
+    const seenIds = new Set<string>();
+    const deduplicated: FixTweetMediaItem[] = [];
+
+    for (const item of combined) {
+      if (!item) {
+        continue;
+      }
+
+      const key =
+        item.id ??
+        `${item.type ?? 'unknown'}::${item.url ?? ''}::${item.duration ?? 0}`;
+
+      if (seenIds.has(key)) {
+        continue;
+      }
+
+      seenIds.add(key);
+      deduplicated.push(item);
+    }
+
+    return deduplicated;
+  }
+
+  private selectVideoUrlsByQuality(mediaItems: FixTweetMediaItem[]): string[] {
     const variants = mediaItems
       .filter((item) => item.type === 'video')
-      .flatMap((video) => video.variants ?? [])
+      .flatMap((video) => [
+        ...(video.variants ?? []),
+        ...this.formatsToVariants(video.formats),
+      ])
       .filter(
         (variant): variant is FixTweetVariant & { url: string } =>
           variant.content_type === 'video/mp4' &&
@@ -124,7 +162,33 @@ export class TwitterProvider implements SocialMediaProvider {
       )
       .sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0));
 
-    return variants[0]?.url ?? null;
+    const dedupedUrls = Array.from(
+      new Set(variants.map((variant) => variant.url)),
+    );
+
+    if (dedupedUrls.length === 0) {
+      return [];
+    }
+
+    const preferredCeilingBitrate = 10_000_000;
+    const preferred = variants
+      .filter((variant) => (variant.bitrate ?? 0) <= preferredCeilingBitrate)
+      .map((variant) => variant.url);
+    const dedupedPreferred = Array.from(new Set(preferred));
+
+    return dedupedPreferred.length > 0 ? dedupedPreferred : dedupedUrls;
+  }
+
+  private formatsToVariants(formats?: FixTweetFormat[]): FixTweetVariant[] {
+    if (!formats || formats.length === 0) {
+      return [];
+    }
+
+    return formats.map((format) => ({
+      url: format.url,
+      bitrate: format.bitrate,
+      content_type: format.container === 'mp4' ? 'video/mp4' : undefined,
+    }));
   }
 
   private collectPhotoUrls(mediaItems: FixTweetMediaItem[]): string[] {
