@@ -20,7 +20,7 @@ It uses:
 The bot accepts supported social media URLs in Telegram and responds in one of three ways:
 
 - If the link is valid and points to a video, it sends the video back to the chat.
-- For Twitter/X videos, it can send up to the top 3 highest-quality MP4 variants in one response flow.
+- For Twitter/X videos, it sends the highest-quality MP4 variant first and retries lower-quality fallbacks if Telegram rejects the initial file.
 - If the link is a slideshow, it sends the images as Telegram media groups.
 - If the link is unsupported or provider processing fails, it replies with a friendly error message.
 
@@ -32,12 +32,12 @@ The app does not write downloaded media to disk.
 - `@start` welcome message
 - Platform-aware URL validation via provider matching
 - TikWM metadata lookup
-- Direct video streaming to Telegram (single or multi-video)
+- Direct video streaming to Telegram (single video, Twitter/X quality fallbacks, or multi-video batching)
 - Slideshow support with batched media groups
 - In-memory cache for TikWM results
 - Provider registry to support multiple social media backends
 - Twitter/X provider implementation using FixTweet status endpoint
-- Top 3 MP4 Twitter/X variant selection by bitrate
+- Twitter/X quality fallback selection by bitrate with Telegram-safe retry ordering
 - Instagram provider implementation with response normalization (`resources` payload and normalized `url_list/media_details` payload)
 - URL-first extraction fallback for Instagram media delivery
 - Auto-expiring cache cleanup to avoid memory growth
@@ -123,6 +123,8 @@ Telegram update handler.
 - Sends the downloading status message
 - Sends video or slideshow output
 - Adds a share button to successful video responses
+- Retries Twitter/X videos through fallback URLs in quality order when Telegram rejects the first attempt
+- Keeps non-Twitter multi-video batching behavior intact
 - Replies with a friendly error when download fails
 
 ## Data model
@@ -153,12 +155,18 @@ Telegram update handler.
 ### Twitter/X result behavior
 
 - The provider extracts the tweet id and calls `https://api.fxtwitter.com/status/{tweetId}`
-- Reads media from `tweet.media.all`
+- Reads media from `tweet.media.all`, `tweet.media.videos`, and `tweet.media.photos`
 - For videos, filters variants to `content_type = video/mp4`
 - Sorts MP4 variants by bitrate descending
-- Returns up to top 3 unique URLs in `videoUrls`
+- Returns a deduplicated, highest-quality-first `videoUrls` array so retries can step down safely
 - If no compatible videos exist, returns photo URLs (up to 4) as slideshow media
 - Logs a warning when the API returns code `200` but media is empty (possible sensitive-content case)
+
+### Telegram delivery behavior
+
+- Twitter/X video responses use ordered fallback retries across `videoUrls`
+- Non-Twitter multi-video responses still use Telegram media-group batching
+- Retry-on-failure logic is exclusive to Twitter/X so Instagram carousel batching still works as before
 
 ### Instagram result behavior
 
@@ -302,6 +310,7 @@ The bot returns a friendly error message when:
 ## Development notes
 
 - The bot handler keeps all Telegram-specific behavior in `BotUpdate`
+- Twitter/X retry handling is exclusive to `BotUpdate` and does not affect non-Twitter batching
 - Download and cache logic stays in the download layer
 - Environment validation fails fast at startup if the bot token is missing
 - Environment validation fails fast at startup if the bot username is missing
