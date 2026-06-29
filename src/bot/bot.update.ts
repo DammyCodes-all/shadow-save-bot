@@ -1,15 +1,23 @@
-import { Injectable } from '@nestjs/common';
-import { Ctx, On, Start, Update } from 'nestjs-telegraf';
+import { Injectable, Logger } from '@nestjs/common';
+import { Ctx, On, Start, Command, Update } from 'nestjs-telegraf';
 import { Context } from 'telegraf';
+import { InjectQueue } from '@nestjs/bullmq';
+import type { Queue } from 'bullmq';
 import { BotService } from './bot.service.js';
 import { DownloadService } from '../download/download.service';
+import { UserService } from '../user/user.service';
 
 @Update()
 @Injectable()
 export class BotUpdate {
+  private readonly logger = new Logger(BotUpdate.name);
+  private readonly broadcastComposers = new Set<number>();
+
   constructor(
     private readonly botService: BotService,
     private readonly downloadService: DownloadService,
+    private readonly userService: UserService,
+    @InjectQueue('broadcast') private readonly broadcastQueue: Queue,
   ) {}
 
   @Start()
@@ -17,15 +25,59 @@ export class BotUpdate {
     await ctx.reply(this.botService.getWelcomeMessage());
   }
 
+  @Command('stats')
+  async onStats(@Ctx() ctx: Context) {
+    if (!ctx.from || !this.botService.isAdmin(ctx.from.id)) {
+      return;
+    }
+
+    await ctx.reply('⏳ Calculating stats...');
+
+    try {
+      const stats = await this.userService.getStats();
+      await ctx.reply(
+        this.botService.getStatsMessage(
+          stats.totalUsers,
+          stats.downloadsToday,
+          stats.perPlatform,
+        ),
+      );
+    } catch (error: any) {
+      this.logger.error(`Stats error: ${error.message}`);
+      await ctx.reply('❌ Failed to fetch stats. Try again.');
+    }
+  }
+
+  @Command('broadcast')
+  async onBroadcast(@Ctx() ctx: Context) {
+    if (!ctx.from || !this.botService.isAdmin(ctx.from.id)) {
+      return;
+    }
+
+    this.broadcastComposers.add(ctx.from.id);
+    await ctx.reply('Send the message you want to broadcast to all users:');
+  }
+
   @On('text')
   async onText(@Ctx() ctx: Context) {
     const message = ctx.message;
 
-    if (!message || !('text' in message)) {
+    if (!message || !('text' in message) || !ctx.from) {
       return;
     }
 
-    const url = message.text.trim();
+    const text = message.text.trim();
+
+    if (text.startsWith('/')) {
+      return;
+    }
+
+    if (this.broadcastComposers.has(ctx.from.id)) {
+      await this.sendBroadcast(ctx, text);
+      return;
+    }
+
+    const url = text;
     const platform = this.downloadService.detectPlatform(url);
 
     if (!platform) {
@@ -41,6 +93,20 @@ export class BotUpdate {
 
     try {
       const mediaInfo = await this.downloadService.getMediaInfo(url);
+
+      const mediaType =
+        mediaInfo.videoUrl ? 'video'
+        : mediaInfo.images && mediaInfo.images.length > 0 ? 'image'
+        : null;
+      this.userService.recordUser(ctx.from).catch(() => {});
+      this.userService.recordEvent({
+        userTelegramId: ctx.from.id,
+        platform: mediaInfo.platform,
+        mediaType,
+        url,
+        success: true,
+      }).catch(() => {});
+      this.userService.incrementDownloadCount(ctx.from.id).catch(() => {});
 
       if (mediaInfo.images && mediaInfo.images.length > 0) {
         if (mediaInfo.images.length === 1) {
@@ -140,6 +206,31 @@ export class BotUpdate {
       }
 
       await ctx.reply(this.botService.getDownloadFailureMessage(platform));
+    }
+  }
+
+  private async sendBroadcast(ctx: Context, text: string): Promise<void> {
+    this.broadcastComposers.delete(ctx.from!.id);
+
+    try {
+      const userIds = await this.userService.getAllNonBannedUserIds();
+
+      if (userIds.length === 0) {
+        await ctx.reply('No users to broadcast to.');
+        return;
+      }
+
+      const jobs = userIds.map((chatId) => ({
+        name: `broadcast:${chatId}`,
+        data: { chatId, text },
+      }));
+
+      await this.broadcastQueue.addBulk(jobs);
+      this.logger.log(`Broadcast queued for ${userIds.length} users: "${text.substring(0, 50)}..."`);
+      await ctx.reply(`📢 Broadcast queued for ${userIds.length} users.`);
+    } catch (error: any) {
+      this.logger.error(`Broadcast error: ${error.message}`);
+      await ctx.reply('❌ Failed to prepare broadcast. Try again.');
     }
   }
 
