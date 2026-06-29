@@ -35,13 +35,7 @@ export class BotUpdate {
 
     try {
       const stats = await this.userService.getStats();
-      await ctx.reply(
-        this.botService.getStatsMessage(
-          stats.totalUsers,
-          stats.downloadsToday,
-          stats.perPlatform,
-        ),
-      );
+      await ctx.reply(this.botService.getStatsMessage(stats));
     } catch (error: any) {
       this.logger.error(`Stats error: ${error.message}`);
       await ctx.reply('❌ Failed to fetch stats. Try again.');
