@@ -3,3 +3,6 @@ allowBuilds:
   puppeteer: true
   youtube-dl-exec: true
   esbuild: true
+  '@nestjs/core': true
+  msgpackr-extract: true
+  unrs-resolver: true
