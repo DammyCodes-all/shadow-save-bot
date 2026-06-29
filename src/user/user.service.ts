@@ -15,8 +15,17 @@ export type RecordDownloadEventParams = {
 
 export type UserStats = {
   totalUsers: number;
+  totalDownloads: number;
   downloadsToday: number;
+  downloadsThisWeek: number;
+  activeUsersToday: number;
+  activeUsersThisWeek: number;
+  newUsersToday: number;
+  newUsersThisWeek: number;
   perPlatform: { platform: string; count: number }[];
+  perMediaType: { type: string; count: number }[];
+  topUsers: { username: string | null; downloads: number }[];
+  successRate: number;
 };
 
 @Injectable()
@@ -93,21 +102,91 @@ export class UserService implements OnModuleInit {
   }
 
   async getStats(): Promise<UserStats> {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
 
-    const [totalUsers, downloadsToday, perPlatform] = await Promise.all([
+    const [
+      totalUsers,
+      totalDownloads,
+      downloadsToday,
+      downloadsThisWeek,
+      activeUsersToday,
+      activeUsersThisWeek,
+      newUsersToday,
+      newUsersThisWeek,
+      perPlatform,
+      perMediaType,
+      topUsers,
+      successCount,
+    ] = await Promise.all([
       this.userRepo.count(),
-      this.eventRepo.count({ where: { createdAt: MoreThanOrEqual(today) } }),
+      this.eventRepo.count({ where: { success: true } }),
+      this.eventRepo.count({ where: { createdAt: MoreThanOrEqual(today), success: true } }),
+      this.eventRepo.count({ where: { createdAt: MoreThanOrEqual(weekAgo), success: true } }),
+
+      this.countDistinctUserIdsSince(today),
+      this.countDistinctUserIdsSince(weekAgo),
+
+      this.userRepo.count({ where: { firstSeenAt: MoreThanOrEqual(today) } }),
+      this.userRepo.count({ where: { firstSeenAt: MoreThanOrEqual(weekAgo) } }),
+
       this.eventRepo
         .createQueryBuilder('e')
         .select('e.platform', 'platform')
         .addSelect('COUNT(*)', 'count')
+        .where('e.success = true')
         .groupBy('e.platform')
         .orderBy('COUNT(*)', 'DESC')
         .getRawMany<{ platform: string; count: number }>(),
+
+      this.eventRepo
+        .createQueryBuilder('e')
+        .select('e.mediaType', 'type')
+        .addSelect('COUNT(*)', 'count')
+        .where('e.mediaType IS NOT NULL')
+        .andWhere('e.success = true')
+        .groupBy('e.mediaType')
+        .orderBy('COUNT(*)', 'DESC')
+        .getRawMany<{ type: string; count: number }>(),
+
+      this.userRepo.find({
+        order: { totalDownloads: 'DESC' },
+        take: 3,
+        select: { username: true, totalDownloads: true },
+      }),
+
+      this.eventRepo.count({ where: { success: true } }),
     ]);
 
-    return { totalUsers, downloadsToday, perPlatform };
+    const totalEvents = await this.eventRepo.count();
+    const successRate = totalEvents > 0 ? Math.round((successCount / totalEvents) * 100) : 0;
+
+    return {
+      totalUsers,
+      totalDownloads,
+      downloadsToday,
+      downloadsThisWeek,
+      activeUsersToday,
+      activeUsersThisWeek,
+      newUsersToday,
+      newUsersThisWeek,
+      perPlatform,
+      perMediaType,
+      topUsers: topUsers.map((u) => ({
+        username: u.username,
+        downloads: u.totalDownloads,
+      })),
+      successRate,
+    };
+  }
+
+  private async countDistinctUserIdsSince(since: Date): Promise<number> {
+    const result = await this.eventRepo
+      .createQueryBuilder('e')
+      .select('COUNT(DISTINCT e.userTelegramId)', 'count')
+      .where('e.createdAt >= :since', { since })
+      .getRawOne<{ count: string }>();
+    return Number(result?.count ?? 0);
   }
 }
