@@ -32,6 +32,33 @@ export class BotService {
     return `Got it! Downloading... ${url}`;
   }
 
+  isAdmin(telegramId: number): boolean {
+    const adminIds = this.configService.get<number[]>('ADMIN_IDS');
+    if (!Array.isArray(adminIds)) {
+      return false;
+    }
+    return adminIds.includes(telegramId);
+  }
+
+  getStatsMessage(totalUsers: number, downloadsToday: number, perPlatform: { platform: string; count: number }[]): string {
+    const lines = [
+      '📊 Bot Statistics',
+      '',
+      `👥 Total users: ${totalUsers.toLocaleString()}`,
+      `📥 Downloads today: ${downloadsToday.toLocaleString()}`,
+    ];
+
+    if (perPlatform.length > 0) {
+      lines.push('');
+      lines.push('📱 By platform:');
+      for (const p of perPlatform) {
+        lines.push(`   • ${p.platform}: ${p.count.toLocaleString()}`);
+      }
+    }
+
+    return lines.join('\n');
+  }
+
   getShareWithFriendsMarkup() {
     const botUsername = this.configService.getOrThrow<string>(
       'TELEGRAM_BOT_USERNAME',
