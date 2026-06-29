@@ -1,0 +1,5 @@
+allowBuilds:
+  ffmpeg-static: true
+  puppeteer: true
+  youtube-dl-exec: true
+  esbuild: true
