@@ -89,18 +89,10 @@ export class BotUpdate {
       const mediaInfo = await this.downloadService.getMediaInfo(url);
 
       const mediaType =
-        mediaInfo.videoUrl ? 'video'
-        : mediaInfo.images && mediaInfo.images.length > 0 ? 'image'
+        mediaInfo.images && mediaInfo.images.length > 0 ? 'image'
+        : mediaInfo.videoUrl ? 'video'
         : null;
       this.userService.recordUser(ctx.from).catch(() => {});
-      this.userService.recordEvent({
-        userTelegramId: ctx.from.id,
-        platform: mediaInfo.platform,
-        mediaType,
-        url,
-        success: true,
-      }).catch(() => {});
-      this.userService.incrementDownloadCount(ctx.from.id).catch(() => {});
 
       if (mediaInfo.images && mediaInfo.images.length > 0) {
         if (mediaInfo.images.length === 1) {
@@ -124,6 +116,15 @@ export class BotUpdate {
             }
           }
         }
+
+        this.userService.recordEvent({
+          userTelegramId: ctx.from.id,
+          platform: mediaInfo.platform,
+          mediaType,
+          url,
+          success: true,
+        }).catch(() => {});
+        this.userService.incrementDownloadCount(ctx.from.id).catch(() => {});
 
         await ctx.telegram.deleteMessage(
           downloadingMessage.chat.id,
@@ -172,12 +173,29 @@ export class BotUpdate {
           );
         }
 
+        this.userService.recordEvent({
+          userTelegramId: ctx.from.id,
+          platform: mediaInfo.platform,
+          mediaType,
+          url,
+          success: true,
+        }).catch(() => {});
+        this.userService.incrementDownloadCount(ctx.from.id).catch(() => {});
+
         await ctx.telegram.deleteMessage(
           downloadingMessage.chat.id,
           downloadingMessage.message_id,
         );
         return;
       }
+
+      this.userService.recordEvent({
+        userTelegramId: ctx.from.id,
+        platform,
+        mediaType: null,
+        url,
+        success: false,
+      }).catch(() => {});
 
       await ctx.reply(this.botService.getDownloadFailureMessage(platform));
       try {
@@ -187,6 +205,14 @@ export class BotUpdate {
         );
       } catch {}
     } catch (error: unknown) {
+      this.userService.recordEvent({
+        userTelegramId: ctx.from.id,
+        platform,
+        mediaType: null,
+        url,
+        success: false,
+      }).catch(() => {});
+
       try {
         await ctx.telegram.deleteMessage(
           downloadingMessage.chat.id,
