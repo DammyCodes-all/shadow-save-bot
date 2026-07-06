@@ -24,5 +24,3 @@ export type MediaInfo = {
   music: string;
   author: string;
 };
-
-

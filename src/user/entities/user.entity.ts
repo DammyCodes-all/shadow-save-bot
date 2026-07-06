@@ -20,7 +20,12 @@ export class UserEntity {
   @Column({ type: 'varchar', length: 255, nullable: true, name: 'last_name' })
   lastName: string | null;
 
-  @Column({ type: 'varchar', length: 10, nullable: true, name: 'language_code' })
+  @Column({
+    type: 'varchar',
+    length: 10,
+    nullable: true,
+    name: 'language_code',
+  })
   languageCode: string | null;
 
   @CreateDateColumn({ name: 'first_seen_at' })

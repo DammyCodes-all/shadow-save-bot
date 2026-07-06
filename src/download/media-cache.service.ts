@@ -15,9 +15,7 @@ export class MediaCacheService implements OnModuleDestroy {
   private readonly cacheKeys = new Map<string, CacheEntry>();
   private readonly cleanupTimer: NodeJS.Timeout;
 
-  constructor(
-    @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
-  ) {
+  constructor(@Inject(CACHE_MANAGER) private readonly cacheManager: Cache) {
     this.cleanupTimer = setInterval(() => {
       void this.prune();
     }, this.cleanupIntervalMs);
@@ -38,7 +36,11 @@ export class MediaCacheService implements OnModuleDestroy {
     return cached;
   }
 
-  async set(platform: SocialPlatform, url: string, value: MediaInfo): Promise<void> {
+  async set(
+    platform: SocialPlatform,
+    url: string,
+    value: MediaInfo,
+  ): Promise<void> {
     const key = this.getKey(platform, url);
     await this.cacheManager.set(key, value, this.ttlMs);
     this.cacheKeys.set(key, { insertedAt: Date.now() });
@@ -66,7 +68,9 @@ export class MediaCacheService implements OnModuleDestroy {
     }
 
     while (this.cacheKeys.size > this.maxEntries) {
-      const oldestKey = this.cacheKeys.keys().next().value as string | undefined;
+      const oldestKey = this.cacheKeys.keys().next().value as
+        | string
+        | undefined;
       if (!oldestKey) {
         break;
       }
