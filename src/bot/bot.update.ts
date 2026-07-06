@@ -1,9 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Ctx, On, Start, Command, Update } from 'nestjs-telegraf';
 import { Context } from 'telegraf';
-import { InjectQueue } from '@nestjs/bullmq';
-import type { Queue } from 'bullmq';
 import { BotService } from './bot.service.js';
+import { BroadcastService } from './broadcast.service';
 import { DownloadService } from '../download/download.service';
 import { UserService } from '../user/user.service';
 
@@ -17,7 +16,7 @@ export class BotUpdate {
     private readonly botService: BotService,
     private readonly downloadService: DownloadService,
     private readonly userService: UserService,
-    @InjectQueue('broadcast') private readonly broadcastQueue: Queue,
+    private readonly broadcastService: BroadcastService,
   ) {}
 
   @Start()
@@ -36,8 +35,9 @@ export class BotUpdate {
     try {
       const stats = await this.userService.getStats();
       await ctx.reply(this.botService.getStatsMessage(stats));
-    } catch (error: any) {
-      this.logger.error(`Stats error: ${error.message}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'unknown error';
+      this.logger.error(`Stats error: ${message}`);
       await ctx.reply('❌ Failed to fetch stats. Try again.');
     }
   }
@@ -50,6 +50,19 @@ export class BotUpdate {
 
     this.broadcastComposers.add(ctx.from.id);
     await ctx.reply('Send the message you want to broadcast to all users:');
+  }
+
+  @Command('exit')
+  async onExit(@Ctx() ctx: Context) {
+    if (!ctx.from || !this.botService.isAdmin(ctx.from.id)) {
+      return;
+    }
+
+    if (this.broadcastComposers.delete(ctx.from.id)) {
+      await ctx.reply('Broadcast cancelled. You are back to normal mode.');
+    } else {
+      await ctx.reply('No active broadcast to cancel.');
+    }
   }
 
   @On('text')
@@ -89,9 +102,11 @@ export class BotUpdate {
       const mediaInfo = await this.downloadService.getMediaInfo(url);
 
       const mediaType =
-        mediaInfo.images && mediaInfo.images.length > 0 ? 'image'
-        : mediaInfo.videoUrl ? 'video'
-        : null;
+        mediaInfo.images && mediaInfo.images.length > 0
+          ? 'image'
+          : mediaInfo.videoUrl
+            ? 'video'
+            : null;
       this.userService.recordUser(ctx.from).catch(() => {});
 
       if (mediaInfo.images && mediaInfo.images.length > 0) {
@@ -117,13 +132,15 @@ export class BotUpdate {
           }
         }
 
-        this.userService.recordEvent({
-          userTelegramId: ctx.from.id,
-          platform: mediaInfo.platform,
-          mediaType,
-          url,
-          success: true,
-        }).catch(() => {});
+        this.userService
+          .recordEvent({
+            userTelegramId: ctx.from.id,
+            platform: mediaInfo.platform,
+            mediaType,
+            url,
+            success: true,
+          })
+          .catch(() => {});
         this.userService.incrementDownloadCount(ctx.from.id).catch(() => {});
 
         await ctx.telegram.deleteMessage(
@@ -173,13 +190,15 @@ export class BotUpdate {
           );
         }
 
-        this.userService.recordEvent({
-          userTelegramId: ctx.from.id,
-          platform: mediaInfo.platform,
-          mediaType,
-          url,
-          success: true,
-        }).catch(() => {});
+        this.userService
+          .recordEvent({
+            userTelegramId: ctx.from.id,
+            platform: mediaInfo.platform,
+            mediaType,
+            url,
+            success: true,
+          })
+          .catch(() => {});
         this.userService.incrementDownloadCount(ctx.from.id).catch(() => {});
 
         await ctx.telegram.deleteMessage(
@@ -189,13 +208,15 @@ export class BotUpdate {
         return;
       }
 
-      this.userService.recordEvent({
-        userTelegramId: ctx.from.id,
-        platform,
-        mediaType: null,
-        url,
-        success: false,
-      }).catch(() => {});
+      this.userService
+        .recordEvent({
+          userTelegramId: ctx.from.id,
+          platform,
+          mediaType: null,
+          url,
+          success: false,
+        })
+        .catch(() => {});
 
       await ctx.reply(this.botService.getDownloadFailureMessage(platform));
       try {
@@ -205,13 +226,15 @@ export class BotUpdate {
         );
       } catch {}
     } catch (error: unknown) {
-      this.userService.recordEvent({
-        userTelegramId: ctx.from.id,
-        platform,
-        mediaType: null,
-        url,
-        success: false,
-      }).catch(() => {});
+      this.userService
+        .recordEvent({
+          userTelegramId: ctx.from.id,
+          platform,
+          mediaType: null,
+          url,
+          success: false,
+        })
+        .catch(() => {});
 
       try {
         await ctx.telegram.deleteMessage(
@@ -240,16 +263,16 @@ export class BotUpdate {
         return;
       }
 
-      const jobs = userIds.map((chatId) => ({
-        name: `broadcast:${chatId}`,
-        data: { chatId, text },
-      }));
-
-      await this.broadcastQueue.addBulk(jobs);
-      this.logger.log(`Broadcast queued for ${userIds.length} users: "${text.substring(0, 50)}..."`);
-      await ctx.reply(`📢 Broadcast queued for ${userIds.length} users.`);
-    } catch (error: any) {
-      this.logger.error(`Broadcast error: ${error.message}`);
+      this.broadcastService.sendAll(userIds, text);
+      this.logger.log(
+        `Broadcast started for ${userIds.length} users: "${text.substring(0, 50)}..."`,
+      );
+      await ctx.reply(
+        `📢 Broadcasting to ${userIds.length} users. This may take a moment.`,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'unknown error';
+      this.logger.error(`Broadcast error: ${message}`);
       await ctx.reply('❌ Failed to prepare broadcast. Try again.');
     }
   }

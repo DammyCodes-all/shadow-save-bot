@@ -45,7 +45,9 @@ export class UserService implements OnModuleInit {
       await this.dataSource.query('SELECT 1');
       this.logger.log('Database pool warmed');
     } catch {
-      this.logger.warn('Database pool warmup failed, will retry on first query');
+      this.logger.warn(
+        'Database pool warmup failed, will retry on first query',
+      );
     }
   }
 
@@ -65,7 +67,8 @@ export class UserService implements OnModuleInit {
       existing.username = telegramUser.username ?? existing.username;
       existing.firstName = telegramUser.first_name ?? existing.firstName;
       existing.lastName = telegramUser.last_name ?? existing.lastName;
-      existing.languageCode = telegramUser.language_code ?? existing.languageCode;
+      existing.languageCode =
+        telegramUser.language_code ?? existing.languageCode;
       return this.userRepo.save(existing);
     }
 
@@ -78,7 +81,9 @@ export class UserService implements OnModuleInit {
     });
   }
 
-  async recordEvent(params: RecordDownloadEventParams): Promise<DownloadEventEntity> {
+  async recordEvent(
+    params: RecordDownloadEventParams,
+  ): Promise<DownloadEventEntity> {
     const event = this.eventRepo.create({
       userTelegramId: params.userTelegramId,
       platform: params.platform,
@@ -103,7 +108,9 @@ export class UserService implements OnModuleInit {
 
   async getStats(): Promise<UserStats> {
     const now = new Date();
-    const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const today = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+    );
     const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
 
     const [
@@ -121,8 +128,12 @@ export class UserService implements OnModuleInit {
     ] = await Promise.all([
       this.userRepo.count(),
       this.eventRepo.count({ where: { success: true } }),
-      this.eventRepo.count({ where: { createdAt: MoreThanOrEqual(today), success: true } }),
-      this.eventRepo.count({ where: { createdAt: MoreThanOrEqual(weekAgo), success: true } }),
+      this.eventRepo.count({
+        where: { createdAt: MoreThanOrEqual(today), success: true },
+      }),
+      this.eventRepo.count({
+        where: { createdAt: MoreThanOrEqual(weekAgo), success: true },
+      }),
 
       this.countDistinctActiveUsersSince(today),
       this.countDistinctActiveUsersSince(weekAgo),
@@ -161,17 +172,23 @@ export class UserService implements OnModuleInit {
     ]);
 
     const totalEvents = await this.eventRepo.count();
-    const successRate = totalEvents > 0 ? Math.round((successfulDownloads / totalEvents) * 100) : 0;
+    const successRate =
+      totalEvents > 0
+        ? Math.round((successfulDownloads / totalEvents) * 100)
+        : 0;
 
-    const topUserIds = rawTopUsers.map(r => r.userTelegramId);
-    const userEntities = topUserIds.length > 0
-      ? await this.userRepo.find({
-          where: { telegramId: In(topUserIds) },
-          select: { telegramId: true, username: true },
-        })
-      : [];
-    const userMap = new Map(userEntities.map(u => [u.telegramId, u.username]));
-    const topUsers = rawTopUsers.map(r => ({
+    const topUserIds = rawTopUsers.map((r) => r.userTelegramId);
+    const userEntities =
+      topUserIds.length > 0
+        ? await this.userRepo.find({
+            where: { telegramId: In(topUserIds) },
+            select: { telegramId: true, username: true },
+          })
+        : [];
+    const userMap = new Map(
+      userEntities.map((u) => [u.telegramId, u.username]),
+    );
+    const topUsers = rawTopUsers.map((r) => ({
       username: userMap.get(r.userTelegramId) ?? null,
       downloads: Number(r.downloads),
     }));

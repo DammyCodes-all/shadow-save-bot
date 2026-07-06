@@ -82,7 +82,8 @@ export class BotService {
       lines.push('');
       lines.push('🎞️ By type:');
       for (const m of stats.perMediaType) {
-        const label = m.type === 'video' ? 'Video' : m.type === 'image' ? 'Image' : m.type;
+        const label =
+          m.type === 'video' ? 'Video' : m.type === 'image' ? 'Image' : m.type;
         lines.push(`   • ${label}: ${m.count.toLocaleString()}`);
       }
     }
