@@ -2,7 +2,7 @@
 
 Built with 💜 by aluminate
 
-Shadow Save Bot is a NestJS Telegram bot with provider-based multi-social media support. It currently supports TikTok, Twitter/X, and Instagram media extraction and sends content directly in Telegram without saving files to disk.
+Shadow Save Bot is  a NestJS Telegram bot with provider-based multi-social media support. It currently supports TikTok, Twitter/X, and Instagram media extraction and sends content directly in Telegram without saving files to disk.
 
 It uses:
 
