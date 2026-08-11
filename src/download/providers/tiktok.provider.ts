@@ -17,9 +17,11 @@ export class TiktokProvider implements SocialMediaProvider {
   private readonly ssstikUserAgent =
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36';
   private queueTail: Promise<void> = Promise.resolve();
-  private readonly tikwmBaseUrl = this.resolveTikwmBaseUrl();
+  private readonly tikwmBaseUrl: string;
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(private readonly configService: ConfigService) {
+    this.tikwmBaseUrl = this.resolveTikwmBaseUrl();
+  }
 
   private resolveTikwmBaseUrl(): string {
     const proxyUrl = this.configService.get<string>('TIKWM_PROXY_URL');
