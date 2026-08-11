@@ -226,6 +226,12 @@ export class BotUpdate {
         );
       } catch {}
     } catch (error: unknown) {
+      const errorMessage =
+        error instanceof Error ? error.message : 'unknown error';
+      this.logger.error(
+        `Download failed for ${url} (platform: ${platform}): ${errorMessage}`,
+      );
+
       this.userService
         .recordEvent({
           userTelegramId: ctx.from.id,
