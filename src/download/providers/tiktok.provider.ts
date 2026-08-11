@@ -1,4 +1,5 @@
 import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type { MediaInfo, TikwmResponse } from '../download.types';
 import type { SocialMediaProvider } from './social-media-provider.interface';
 
@@ -16,6 +17,17 @@ export class TiktokProvider implements SocialMediaProvider {
   private readonly ssstikUserAgent =
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36';
   private queueTail: Promise<void> = Promise.resolve();
+  private readonly tikwmBaseUrl = this.resolveTikwmBaseUrl();
+
+  constructor(private readonly configService: ConfigService) {}
+
+  private resolveTikwmBaseUrl(): string {
+    const proxyUrl = this.configService.get<string>('TIKWM_PROXY_URL');
+    if (proxyUrl) {
+      this.logger.log(`Using TikWM proxy: ${proxyUrl}`);
+    }
+    return (proxyUrl ?? 'https://www.tikwm.com').replace(/\/+$/, '');
+  }
 
   canHandle(url: string): boolean {
     return this.tiktokUrlPattern.test(url.trim());
@@ -182,7 +194,7 @@ export class TiktokProvider implements SocialMediaProvider {
 
   private throttledFetch(url: string): Promise<TikwmResponse | null> {
     const request = this.queueTail.then(async () => {
-      const endpoint = `https://www.tikwm.com/api/?url=${encodeURIComponent(url)}`;
+      const endpoint = `${this.tikwmBaseUrl}/api/?url=${encodeURIComponent(url)}`;
 
       let response: Response;
       try {
