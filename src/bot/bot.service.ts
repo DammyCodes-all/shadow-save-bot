@@ -28,6 +28,14 @@ export class BotService {
     return `❌ Failed to download. Make sure it's a valid public ${this.getPlatformName(platform)} link.`;
   }
 
+  getFileTooLargeMessage(_platform: SocialPlatform): string {
+    return `😔 This file is a bit too large to send here (Telegram's 50 MB limit).\nSend me a shorter video and I'll grab it for you!`;
+  }
+
+  getAudioFileTooLargeMessage(_platform: SocialPlatform): string {
+    return `😔 This audio is a bit too large to send (50 MB limit).\nTry another video — I'll get it for you right away!`;
+  }
+
   getDownloadQueuedMessage(url: string): string {
     return `Got it! Downloading... ${url}`;
   }
@@ -194,6 +202,10 @@ export class BotService {
 
     if (platform === 'twitter') {
       return 'Twitter/X';
+    }
+
+    if (platform === 'instagram') {
+      return 'Instagram';
     }
 
     return platform;

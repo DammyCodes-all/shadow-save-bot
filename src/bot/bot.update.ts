@@ -119,35 +119,62 @@ export class BotUpdate {
             ? this.createAudioCallback(mediaInfo.music, mediaInfo.title)
             : null;
 
-        if (mediaInfo.images.length === 1) {
-          const markup = tiktokAudioCallback
-            ? this.botService.getMediaReplyMarkup(tiktokAudioCallback)
-            : this.botService.getShareWithFriendsMarkup();
-          await ctx.replyWithPhoto(mediaInfo.images[0], markup as never);
-        } else {
-          for (let index = 0; index < mediaInfo.images.length; index += 10) {
-            const imageBatch = mediaInfo.images.slice(index, index + 10);
+        try {
+          if (mediaInfo.images.length === 1) {
+            const markup = tiktokAudioCallback
+              ? this.botService.getMediaReplyMarkup(tiktokAudioCallback)
+              : this.botService.getShareWithFriendsMarkup();
+            await ctx.replyWithPhoto(mediaInfo.images[0], markup as never);
+          } else {
+            for (let index = 0; index < mediaInfo.images.length; index += 10) {
+              const imageBatch = mediaInfo.images.slice(index, index + 10);
 
-            if (imageBatch.length === 1) {
-              await ctx.replyWithPhoto(imageBatch[0]);
-            } else {
-              await ctx.replyWithMediaGroup(
-                imageBatch.map((imageUrl) => ({
-                  type: 'photo',
-                  media: imageUrl,
-                })),
+              if (imageBatch.length === 1) {
+                await ctx.replyWithPhoto(imageBatch[0]);
+              } else {
+                await ctx.replyWithMediaGroup(
+                  imageBatch.map((imageUrl) => ({
+                    type: 'photo',
+                    media: imageUrl,
+                  })),
+                );
+              }
+            }
+
+            if (tiktokAudioCallback) {
+              await ctx.reply(
+                '🎵 Audio for this slideshow',
+                this.botService.getAudioButtonMarkup(
+                  tiktokAudioCallback,
+                ) as never,
               );
             }
           }
-
-          if (tiktokAudioCallback) {
+        } catch (error) {
+          if (this.isFileTooLargeError(error)) {
             await ctx.reply(
-              '🎵 Audio for this slideshow',
-              this.botService.getAudioButtonMarkup(
-                tiktokAudioCallback,
-              ) as never,
+              this.botService.getFileTooLargeMessage(mediaInfo.platform),
             );
+            await ctx.telegram
+              .deleteMessage(
+                downloadingMessage.chat.id,
+                downloadingMessage.message_id,
+              )
+              .catch(() => {});
+
+            this.userService
+              .recordEvent({
+                userTelegramId: ctx.from.id,
+                platform: mediaInfo.platform,
+                mediaType,
+                url,
+                success: false,
+              })
+              .catch(() => {});
+
+            return;
           }
+          throw error;
         }
 
         this.userService
@@ -181,42 +208,82 @@ export class BotUpdate {
           ? this.botService.getMediaReplyMarkup(tiktokAudioCallback)
           : this.botService.getShareWithFriendsMarkup();
 
-        if (mediaInfo.platform === 'twitter' && videos.length > 1) {
-          let sent = false;
+        try {
+          if (mediaInfo.platform === 'twitter' && videos.length > 1) {
+            let sent = false;
+            let lastError: unknown;
 
-          for (const videoUrl of videos) {
-            try {
-              await ctx.replyWithVideo(videoUrl, videoMarkup as never);
-              sent = true;
-              break;
-            } catch {}
+            for (const videoUrl of videos) {
+              try {
+                await ctx.replyWithVideo(videoUrl, videoMarkup as never);
+                sent = true;
+                break;
+              } catch (error) {
+                if (this.isFileTooLargeError(error)) {
+                  lastError = error;
+                  continue;
+                }
+                lastError = error;
+              }
+            }
+
+            if (!sent) {
+              if (this.isFileTooLargeError(lastError)) {
+                throw Object.assign(
+                  new Error('FILE_TOO_LARGE'),
+                  { cause: lastError },
+                );
+              }
+              throw new Error('Failed to send all available video variants');
+            }
+          } else if (videos.length > 1) {
+            for (let index = 0; index < videos.length; index += 10) {
+              const videoBatch = videos.slice(index, index + 10);
+
+              await ctx.replyWithMediaGroup(
+                videoBatch.map((videoUrl) => ({
+                  type: 'video',
+                  media: videoUrl,
+                })),
+              );
+            }
+
+            if (tiktokAudioCallback) {
+              await ctx.reply(
+                '🎵 Audio for this video',
+                this.botService.getAudioButtonMarkup(
+                  tiktokAudioCallback,
+                ) as never,
+              );
+            }
+          } else {
+            await ctx.replyWithVideo(videos[0], videoMarkup as never);
           }
-
-          if (!sent) {
-            throw new Error('Failed to send all available video variants');
-          }
-        } else if (videos.length > 1) {
-          for (let index = 0; index < videos.length; index += 10) {
-            const videoBatch = videos.slice(index, index + 10);
-
-            await ctx.replyWithMediaGroup(
-              videoBatch.map((videoUrl) => ({
-                type: 'video',
-                media: videoUrl,
-              })),
-            );
-          }
-
-          if (tiktokAudioCallback) {
+        } catch (error) {
+          if (this.isFileTooLargeError(error)) {
             await ctx.reply(
-              '🎵 Audio for this video',
-              this.botService.getAudioButtonMarkup(
-                tiktokAudioCallback,
-              ) as never,
+              this.botService.getFileTooLargeMessage(mediaInfo.platform),
             );
+            await ctx.telegram
+              .deleteMessage(
+                downloadingMessage.chat.id,
+                downloadingMessage.message_id,
+              )
+              .catch(() => {});
+
+            this.userService
+              .recordEvent({
+                userTelegramId: ctx.from.id,
+                platform: mediaInfo.platform,
+                mediaType,
+                url,
+                success: false,
+              })
+              .catch(() => {});
+
+            return;
           }
-        } else {
-          await ctx.replyWithVideo(videos[0], videoMarkup as never);
+          throw error;
         }
 
         this.userService
@@ -277,6 +344,13 @@ export class BotUpdate {
           downloadingMessage.message_id,
         );
       } catch {}
+
+      if (this.isFileTooLargeError(error)) {
+        await ctx
+          .reply(this.botService.getFileTooLargeMessage(platform))
+          .catch(() => {});
+        return;
+      }
 
       if (this.isNotImplementedError(error)) {
         await ctx.reply(this.botService.getNotImplementedMessage(platform));
@@ -344,6 +418,15 @@ export class BotUpdate {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'unknown error';
       this.logger.error(`Audio send failed for ${requestId}: ${message}`);
+
+      if (this.isFileTooLargeError(error)) {
+        await ctx.answerCbQuery('Audio too large for Telegram').catch(() => {});
+        await ctx
+          .reply(this.botService.getAudioFileTooLargeMessage('tiktok'))
+          .catch(() => {});
+        return;
+      }
+
       await ctx.answerCbQuery('Failed to send audio').catch(() => {});
       await ctx
         .reply('❌ Failed to send audio. The track may be unavailable.')
@@ -381,5 +464,44 @@ export class BotUpdate {
     }
 
     return error.getStatus() === 501;
+  }
+
+  private isFileTooLargeError(error: unknown): boolean {
+    const extractMessage = (err: unknown): string => {
+      if (err instanceof Error) {
+        const causeMsg =
+          err.cause instanceof Error ? ` ${err.cause.message}` : '';
+        return `${err.message}${causeMsg}`;
+      }
+      if (typeof err === 'string') {
+        return err;
+      }
+      if (err && typeof err === 'object') {
+        const maybe = err as Record<string, unknown>;
+        const desc =
+          (maybe.description as string | undefined) ??
+          (maybe.response as Record<string, unknown> | undefined)?.description;
+        if (typeof desc === 'string') {
+          return desc;
+        }
+        const nested = maybe.response as Record<string, unknown> | undefined;
+        const nestedDesc =
+          nested?.data as Record<string, unknown> | undefined;
+        if (typeof nestedDesc?.description === 'string') {
+          return nestedDesc.description as string;
+        }
+      }
+      return String(err ?? '');
+    };
+
+    const raw = extractMessage(error).toLowerCase();
+    return (
+      raw.includes('file is too large') ||
+      raw.includes('file_too_large') ||
+      raw.includes('too large') ||
+      raw.includes('request entity too large') ||
+      raw.includes('payload too large') ||
+      raw.includes('413')
+    );
   }
 }
