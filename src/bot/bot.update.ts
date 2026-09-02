@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Ctx, On, Start, Command, Update } from 'nestjs-telegraf';
+import { Action, Ctx, On, Start, Command, Update } from 'nestjs-telegraf';
 import { Context } from 'telegraf';
 import { BotService } from './bot.service.js';
 import { BroadcastService } from './broadcast.service';
@@ -11,6 +11,10 @@ import { UserService } from '../user/user.service';
 export class BotUpdate {
   private readonly logger = new Logger(BotUpdate.name);
   private readonly broadcastComposers = new Set<number>();
+  private readonly audioRequests = new Map<
+    string,
+    { music: string; title: string }
+  >();
 
   constructor(
     private readonly botService: BotService,
@@ -110,11 +114,16 @@ export class BotUpdate {
       this.userService.recordUser(ctx.from).catch(() => {});
 
       if (mediaInfo.images && mediaInfo.images.length > 0) {
+        const tiktokAudioCallback =
+          mediaInfo.platform === 'tiktok' && mediaInfo.music
+            ? this.createAudioCallback(mediaInfo.music, mediaInfo.title)
+            : null;
+
         if (mediaInfo.images.length === 1) {
-          await ctx.replyWithPhoto(
-            mediaInfo.images[0],
-            this.botService.getShareWithFriendsMarkup(),
-          );
+          const markup = tiktokAudioCallback
+            ? this.botService.getMediaReplyMarkup(tiktokAudioCallback)
+            : this.botService.getShareWithFriendsMarkup();
+          await ctx.replyWithPhoto(mediaInfo.images[0], markup as never);
         } else {
           for (let index = 0; index < mediaInfo.images.length; index += 10) {
             const imageBatch = mediaInfo.images.slice(index, index + 10);
@@ -129,6 +138,15 @@ export class BotUpdate {
                 })),
               );
             }
+          }
+
+          if (tiktokAudioCallback) {
+            await ctx.reply(
+              '🎵 Audio for this slideshow',
+              this.botService.getAudioButtonMarkup(
+                tiktokAudioCallback,
+              ) as never,
+            );
           }
         }
 
@@ -155,15 +173,20 @@ export class BotUpdate {
           ? mediaInfo.videoUrls
           : [mediaInfo.videoUrl];
 
+        const tiktokAudioCallback =
+          mediaInfo.platform === 'tiktok' && mediaInfo.music
+            ? this.createAudioCallback(mediaInfo.music, mediaInfo.title)
+            : null;
+        const videoMarkup = tiktokAudioCallback
+          ? this.botService.getMediaReplyMarkup(tiktokAudioCallback)
+          : this.botService.getShareWithFriendsMarkup();
+
         if (mediaInfo.platform === 'twitter' && videos.length > 1) {
           let sent = false;
 
           for (const videoUrl of videos) {
             try {
-              await ctx.replyWithVideo(
-                videoUrl,
-                this.botService.getShareWithFriendsMarkup(),
-              );
+              await ctx.replyWithVideo(videoUrl, videoMarkup as never);
               sent = true;
               break;
             } catch {}
@@ -183,11 +206,17 @@ export class BotUpdate {
               })),
             );
           }
+
+          if (tiktokAudioCallback) {
+            await ctx.reply(
+              '🎵 Audio for this video',
+              this.botService.getAudioButtonMarkup(
+                tiktokAudioCallback,
+              ) as never,
+            );
+          }
         } else {
-          await ctx.replyWithVideo(
-            videos[0],
-            this.botService.getShareWithFriendsMarkup(),
-          );
+          await ctx.replyWithVideo(videos[0], videoMarkup as never);
         }
 
         this.userService
@@ -281,6 +310,65 @@ export class BotUpdate {
       this.logger.error(`Broadcast error: ${message}`);
       await ctx.reply('❌ Failed to prepare broadcast. Try again.');
     }
+  }
+
+  @Action(/^audio:(.+)$/)
+  async onAudioAction(@Ctx() ctx: Context) {
+    const callbackQuery = ctx.callbackQuery as unknown as
+      | { data?: string }
+      | undefined;
+    const data = callbackQuery?.data ?? '';
+    const match = /^audio:(.+)$/.exec(data);
+    const requestId = match?.[1];
+
+    if (!requestId) {
+      await ctx.answerCbQuery('Invalid audio request').catch(() => {});
+      return;
+    }
+
+    const entry = this.audioRequests.get(requestId);
+
+    if (!entry) {
+      await ctx
+        .answerCbQuery('Audio expired — please resend the link')
+        .catch(() => {});
+      return;
+    }
+
+    try {
+      await ctx.answerCbQuery('Sending audio...').catch(() => {});
+
+      await ctx.replyWithAudio(entry.music, {
+        title: entry.title || undefined,
+      } as unknown as Parameters<Context['replyWithAudio']>[1]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'unknown error';
+      this.logger.error(`Audio send failed for ${requestId}: ${message}`);
+      await ctx.answerCbQuery('Failed to send audio').catch(() => {});
+      await ctx
+        .reply('❌ Failed to send audio. The track may be unavailable.')
+        .catch(() => {});
+    }
+  }
+
+  private createAudioCallback(music: string, title: string): string {
+    const id = Math.random().toString(36).slice(2, 10);
+    this.audioRequests.set(id, { music, title });
+
+    const timer = setTimeout(
+      () => {
+        this.audioRequests.delete(id);
+      },
+      2 * 60 * 60 * 1000,
+    );
+
+    if (
+      typeof (timer as unknown as { unref?: () => void }).unref === 'function'
+    ) {
+      (timer as unknown as { unref: () => void }).unref();
+    }
+
+    return `audio:${id}`;
   }
 
   private isNotImplementedError(error: unknown): boolean {

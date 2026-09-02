@@ -119,6 +119,68 @@ export class BotService {
     };
   }
 
+  getMediaReplyMarkup(audioCallbackData?: string) {
+    const botUsername = this.configService.getOrThrow<string>(
+      'TELEGRAM_BOT_USERNAME',
+    );
+
+    const keyboard: Array<
+      Array<
+        { text: string; url: string } | { text: string; callback_data: string }
+      >
+    > = [
+      [
+        {
+          text: 'Share bot with friends',
+          url: `https://t.me/share/url?url=${encodeURIComponent(`https://t.me/${botUsername}`)}&text=${encodeURIComponent('Check out this bot for downloading TikTok videos and slideshows!')}`,
+        },
+      ],
+    ] as unknown as Array<
+      Array<
+        { text: string; url: string } | { text: string; callback_data: string }
+      >
+    >;
+
+    if (audioCallbackData) {
+      (keyboard as Array<Array<{ text: string; callback_data: string }>>).push([
+        {
+          text: '🎧 Get audio',
+          callback_data: audioCallbackData,
+        },
+      ]);
+    }
+
+    return {
+      reply_markup: {
+        inline_keyboard: keyboard as unknown as Array<
+          Array<
+            | { text: string; url: string }
+            | { text: string; callback_data: string }
+          >
+        >,
+      },
+    } as const;
+  }
+
+  getAudioButtonMarkup(audioCallbackData: string): {
+    reply_markup: {
+      inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
+    };
+  } {
+    return {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            {
+              text: '🎧 Get audio',
+              callback_data: audioCallbackData,
+            },
+          ],
+        ],
+      },
+    };
+  }
+
   private getPlatformDisplayText(platforms: SocialPlatform[]): string {
     return platforms
       .map((platform) => this.getPlatformName(platform))
