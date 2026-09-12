@@ -36,6 +36,16 @@ export class DownloadService {
     return mediaInfo;
   }
 
+  async refreshMediaInfo(url: string): Promise<MediaInfo> {
+    const platform = this.detectPlatform(url);
+
+    if (platform) {
+      await this.mediaCacheService.del(platform, url);
+    }
+
+    return this.getMediaInfo(url);
+  }
+
   detectPlatform(url: string): SocialPlatform | null {
     return this.findProviderForUrl(url)?.platform ?? null;
   }

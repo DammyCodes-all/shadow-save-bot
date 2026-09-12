@@ -47,6 +47,12 @@ export class MediaCacheService implements OnModuleDestroy {
     await this.prune();
   }
 
+  async del(platform: SocialPlatform, url: string): Promise<void> {
+    const key = this.getKey(platform, url);
+    this.cacheKeys.delete(key);
+    await this.cacheManager.del(key);
+  }
+
   async onModuleDestroy(): Promise<void> {
     clearInterval(this.cleanupTimer);
     await this.cacheManager.clear();

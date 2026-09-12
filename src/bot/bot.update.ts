@@ -102,263 +102,303 @@ export class BotUpdate {
 
     const downloadingMessage = await ctx.reply('⏳ Downloading...');
 
-    try {
-      const mediaInfo = await this.downloadService.getMediaInfo(url);
+    let refreshed = false;
 
-      const mediaType =
-        mediaInfo.images && mediaInfo.images.length > 0
-          ? 'image'
-          : mediaInfo.videoUrl
-            ? 'video'
-            : null;
-      this.userService.recordUser(ctx.from).catch(() => {});
+    while (true) {
+      try {
+        const mediaInfo = await this.downloadService.getMediaInfo(url);
 
-      if (mediaInfo.images && mediaInfo.images.length > 0) {
-        const tiktokAudioCallback =
-          mediaInfo.platform === 'tiktok' && mediaInfo.music
-            ? this.createAudioCallback(mediaInfo.music, mediaInfo.title)
-            : null;
+        const mediaType =
+          mediaInfo.images && mediaInfo.images.length > 0
+            ? 'image'
+            : mediaInfo.videoUrl
+              ? 'video'
+              : null;
+        this.userService.recordUser(ctx.from).catch(() => {});
 
-        try {
-          if (mediaInfo.images.length === 1) {
-            const markup = tiktokAudioCallback
-              ? this.botService.getMediaReplyMarkup(tiktokAudioCallback)
-              : this.botService.getShareWithFriendsMarkup();
-            await ctx.replyWithPhoto(mediaInfo.images[0], markup as never);
-          } else {
-            for (let index = 0; index < mediaInfo.images.length; index += 10) {
-              const imageBatch = mediaInfo.images.slice(index, index + 10);
+        if (mediaInfo.images && mediaInfo.images.length > 0) {
+          const tiktokAudioCallback =
+            mediaInfo.platform === 'tiktok' && mediaInfo.music
+              ? this.createAudioCallback(mediaInfo.music, mediaInfo.title)
+              : null;
 
-              if (imageBatch.length === 1) {
-                await ctx.replyWithPhoto(imageBatch[0]);
-              } else {
+          try {
+            if (mediaInfo.images.length === 1) {
+              const markup = tiktokAudioCallback
+                ? this.botService.getMediaReplyMarkup(tiktokAudioCallback)
+                : this.botService.getShareWithFriendsMarkup();
+              await ctx.replyWithPhoto(mediaInfo.images[0], markup as never);
+            } else {
+              for (
+                let index = 0;
+                index < mediaInfo.images.length;
+                index += 10
+              ) {
+                const imageBatch = mediaInfo.images.slice(index, index + 10);
+
+                if (imageBatch.length === 1) {
+                  await ctx.replyWithPhoto(imageBatch[0]);
+                } else {
+                  await ctx.replyWithMediaGroup(
+                    imageBatch.map((imageUrl) => ({
+                      type: 'photo',
+                      media: imageUrl,
+                    })),
+                  );
+                }
+              }
+
+              if (tiktokAudioCallback) {
+                await ctx.reply(
+                  '🎵 Audio for this slideshow',
+                  this.botService.getAudioButtonMarkup(
+                    tiktokAudioCallback,
+                  ) as never,
+                );
+              }
+            }
+          } catch (error) {
+            if (this.isFileTooLargeError(error)) {
+              await ctx.reply(
+                this.botService.getFileTooLargeMessage(mediaInfo.platform),
+              );
+              await ctx.telegram
+                .deleteMessage(
+                  downloadingMessage.chat.id,
+                  downloadingMessage.message_id,
+                )
+                .catch(() => {});
+
+              this.userService
+                .recordEvent({
+                  userTelegramId: ctx.from.id,
+                  platform: mediaInfo.platform,
+                  mediaType,
+                  url,
+                  success: false,
+                })
+                .catch(() => {});
+
+              return;
+            }
+            throw error;
+          }
+
+          this.userService
+            .recordEvent({
+              userTelegramId: ctx.from.id,
+              platform: mediaInfo.platform,
+              mediaType,
+              url,
+              success: true,
+            })
+            .catch(() => {});
+          this.userService.incrementDownloadCount(ctx.from.id).catch(() => {});
+
+          await ctx.telegram.deleteMessage(
+            downloadingMessage.chat.id,
+            downloadingMessage.message_id,
+          );
+          return;
+        }
+
+        if (mediaInfo.videoUrl) {
+          const videos = mediaInfo.videoUrls?.length
+            ? mediaInfo.videoUrls
+            : [mediaInfo.videoUrl];
+
+          const tiktokAudioCallback =
+            mediaInfo.platform === 'tiktok' && mediaInfo.music
+              ? this.createAudioCallback(mediaInfo.music, mediaInfo.title)
+              : null;
+          const videoMarkup = tiktokAudioCallback
+            ? this.botService.getMediaReplyMarkup(tiktokAudioCallback)
+            : this.botService.getShareWithFriendsMarkup();
+
+          try {
+            if (mediaInfo.platform === 'twitter' && videos.length > 1) {
+              let sent = false;
+              let lastError: unknown;
+
+              for (const videoUrl of videos) {
+                try {
+                  await ctx.replyWithVideo(videoUrl, videoMarkup as never);
+                  sent = true;
+                  break;
+                } catch (error) {
+                  if (this.isFileTooLargeError(error)) {
+                    lastError = error;
+                    continue;
+                  }
+                  lastError = error;
+                }
+              }
+
+              if (!sent) {
+                if (this.isFileTooLargeError(lastError)) {
+                  throw Object.assign(new Error('FILE_TOO_LARGE'), {
+                    cause: lastError,
+                  });
+                }
+                throw new Error('Failed to send all available video variants');
+              }
+            } else if (videos.length > 1) {
+              for (let index = 0; index < videos.length; index += 10) {
+                const videoBatch = videos.slice(index, index + 10);
+
                 await ctx.replyWithMediaGroup(
-                  imageBatch.map((imageUrl) => ({
-                    type: 'photo',
-                    media: imageUrl,
+                  videoBatch.map((videoUrl) => ({
+                    type: 'video',
+                    media: videoUrl,
                   })),
                 );
               }
-            }
 
-            if (tiktokAudioCallback) {
-              await ctx.reply(
-                '🎵 Audio for this slideshow',
-                this.botService.getAudioButtonMarkup(
-                  tiktokAudioCallback,
-                ) as never,
-              );
-            }
-          }
-        } catch (error) {
-          if (this.isFileTooLargeError(error)) {
-            await ctx.reply(
-              this.botService.getFileTooLargeMessage(mediaInfo.platform),
-            );
-            await ctx.telegram
-              .deleteMessage(
-                downloadingMessage.chat.id,
-                downloadingMessage.message_id,
-              )
-              .catch(() => {});
-
-            this.userService
-              .recordEvent({
-                userTelegramId: ctx.from.id,
-                platform: mediaInfo.platform,
-                mediaType,
-                url,
-                success: false,
-              })
-              .catch(() => {});
-
-            return;
-          }
-          throw error;
-        }
-
-        this.userService
-          .recordEvent({
-            userTelegramId: ctx.from.id,
-            platform: mediaInfo.platform,
-            mediaType,
-            url,
-            success: true,
-          })
-          .catch(() => {});
-        this.userService.incrementDownloadCount(ctx.from.id).catch(() => {});
-
-        await ctx.telegram.deleteMessage(
-          downloadingMessage.chat.id,
-          downloadingMessage.message_id,
-        );
-        return;
-      }
-
-      if (mediaInfo.videoUrl) {
-        const videos = mediaInfo.videoUrls?.length
-          ? mediaInfo.videoUrls
-          : [mediaInfo.videoUrl];
-
-        const tiktokAudioCallback =
-          mediaInfo.platform === 'tiktok' && mediaInfo.music
-            ? this.createAudioCallback(mediaInfo.music, mediaInfo.title)
-            : null;
-        const videoMarkup = tiktokAudioCallback
-          ? this.botService.getMediaReplyMarkup(tiktokAudioCallback)
-          : this.botService.getShareWithFriendsMarkup();
-
-        try {
-          if (mediaInfo.platform === 'twitter' && videos.length > 1) {
-            let sent = false;
-            let lastError: unknown;
-
-            for (const videoUrl of videos) {
-              try {
-                await ctx.replyWithVideo(videoUrl, videoMarkup as never);
-                sent = true;
-                break;
-              } catch (error) {
-                if (this.isFileTooLargeError(error)) {
-                  lastError = error;
-                  continue;
-                }
-                lastError = error;
-              }
-            }
-
-            if (!sent) {
-              if (this.isFileTooLargeError(lastError)) {
-                throw Object.assign(
-                  new Error('FILE_TOO_LARGE'),
-                  { cause: lastError },
+              if (tiktokAudioCallback) {
+                await ctx.reply(
+                  '🎵 Audio for this video',
+                  this.botService.getAudioButtonMarkup(
+                    tiktokAudioCallback,
+                  ) as never,
                 );
               }
-              throw new Error('Failed to send all available video variants');
+            } else {
+              await ctx.replyWithVideo(videos[0], videoMarkup as never);
             }
-          } else if (videos.length > 1) {
-            for (let index = 0; index < videos.length; index += 10) {
-              const videoBatch = videos.slice(index, index + 10);
-
-              await ctx.replyWithMediaGroup(
-                videoBatch.map((videoUrl) => ({
-                  type: 'video',
-                  media: videoUrl,
-                })),
-              );
-            }
-
-            if (tiktokAudioCallback) {
+          } catch (error) {
+            if (this.isFileTooLargeError(error)) {
               await ctx.reply(
-                '🎵 Audio for this video',
-                this.botService.getAudioButtonMarkup(
-                  tiktokAudioCallback,
-                ) as never,
+                this.botService.getFileTooLargeMessage(mediaInfo.platform),
               );
+              await ctx.telegram
+                .deleteMessage(
+                  downloadingMessage.chat.id,
+                  downloadingMessage.message_id,
+                )
+                .catch(() => {});
+
+              this.userService
+                .recordEvent({
+                  userTelegramId: ctx.from.id,
+                  platform: mediaInfo.platform,
+                  mediaType,
+                  url,
+                  success: false,
+                })
+                .catch(() => {});
+
+              return;
             }
-          } else {
-            await ctx.replyWithVideo(videos[0], videoMarkup as never);
+            throw error;
           }
-        } catch (error) {
-          if (this.isFileTooLargeError(error)) {
-            await ctx.reply(
-              this.botService.getFileTooLargeMessage(mediaInfo.platform),
-            );
-            await ctx.telegram
-              .deleteMessage(
-                downloadingMessage.chat.id,
-                downloadingMessage.message_id,
-              )
-              .catch(() => {});
 
-            this.userService
-              .recordEvent({
-                userTelegramId: ctx.from.id,
-                platform: mediaInfo.platform,
-                mediaType,
-                url,
-                success: false,
-              })
-              .catch(() => {});
+          this.userService
+            .recordEvent({
+              userTelegramId: ctx.from.id,
+              platform: mediaInfo.platform,
+              mediaType,
+              url,
+              success: true,
+            })
+            .catch(() => {});
+          this.userService.incrementDownloadCount(ctx.from.id).catch(() => {});
 
-            return;
-          }
-          throw error;
+          await ctx.telegram.deleteMessage(
+            downloadingMessage.chat.id,
+            downloadingMessage.message_id,
+          );
+          return;
         }
 
         this.userService
           .recordEvent({
             userTelegramId: ctx.from.id,
-            platform: mediaInfo.platform,
-            mediaType,
+            platform,
+            mediaType: null,
             url,
-            success: true,
+            success: false,
           })
           .catch(() => {});
-        this.userService.incrementDownloadCount(ctx.from.id).catch(() => {});
 
-        await ctx.telegram.deleteMessage(
-          downloadingMessage.chat.id,
-          downloadingMessage.message_id,
-        );
+        await ctx.reply(this.botService.getDownloadFailureMessage(platform));
+        try {
+          await ctx.telegram.deleteMessage(
+            downloadingMessage.chat.id,
+            downloadingMessage.message_id,
+          );
+        } catch {}
+
         return;
-      }
+      } catch (error: unknown) {
+        if (!refreshed && this.isTelegramFetchError(error)) {
+          refreshed = true;
+          this.logger.warn(
+            `Telegram could not fetch media for ${url}, evicting cache and re-extracting once`,
+          );
 
-      this.userService
-        .recordEvent({
-          userTelegramId: ctx.from.id,
-          platform,
-          mediaType: null,
-          url,
-          success: false,
-        })
-        .catch(() => {});
+          try {
+            await this.downloadService.refreshMediaInfo(url);
+          } catch {
+            // ignore here; the retry below surfaces the real error
+          }
 
-      await ctx.reply(this.botService.getDownloadFailureMessage(platform));
-      try {
-        await ctx.telegram.deleteMessage(
-          downloadingMessage.chat.id,
-          downloadingMessage.message_id,
+          continue;
+        }
+
+        const errorMessage =
+          error instanceof Error ? error.message : 'unknown error';
+        this.logger.error(
+          `Download failed for ${url} (platform: ${platform}): ${errorMessage}`,
         );
-      } catch {}
-    } catch (error: unknown) {
-      const errorMessage =
-        error instanceof Error ? error.message : 'unknown error';
-      this.logger.error(
-        `Download failed for ${url} (platform: ${platform}): ${errorMessage}`,
-      );
 
-      this.userService
-        .recordEvent({
-          userTelegramId: ctx.from.id,
-          platform,
-          mediaType: null,
-          url,
-          success: false,
-        })
-        .catch(() => {});
-
-      try {
-        await ctx.telegram.deleteMessage(
-          downloadingMessage.chat.id,
-          downloadingMessage.message_id,
-        );
-      } catch {}
-
-      if (this.isFileTooLargeError(error)) {
-        await ctx
-          .reply(this.botService.getFileTooLargeMessage(platform))
+        this.userService
+          .recordEvent({
+            userTelegramId: ctx.from.id,
+            platform,
+            mediaType: null,
+            url,
+            success: false,
+          })
           .catch(() => {});
+
+        try {
+          await ctx.telegram.deleteMessage(
+            downloadingMessage.chat.id,
+            downloadingMessage.message_id,
+          );
+        } catch {}
+
+        if (this.isFileTooLargeError(error)) {
+          await ctx
+            .reply(this.botService.getFileTooLargeMessage(platform))
+            .catch(() => {});
+          return;
+        }
+
+        if (this.isNotImplementedError(error)) {
+          await ctx.reply(this.botService.getNotImplementedMessage(platform));
+          return;
+        }
+
+        await ctx.reply(this.botService.getDownloadFailureMessage(platform));
         return;
       }
-
-      if (this.isNotImplementedError(error)) {
-        await ctx.reply(this.botService.getNotImplementedMessage(platform));
-        return;
-      }
-
-      await ctx.reply(this.botService.getDownloadFailureMessage(platform));
     }
+  }
+
+  private isTelegramFetchError(error: unknown): boolean {
+    const message =
+      error instanceof Error
+        ? error.message
+        : typeof error === 'string'
+          ? error
+          : error &&
+              typeof error === 'object' &&
+              typeof (error as Record<string, unknown>).description === 'string'
+            ? ((error as Record<string, unknown>).description as string)
+            : String(error ?? '');
+
+    return message.toLowerCase().includes('failed to get http url content');
   }
 
   private async sendBroadcast(ctx: Context, text: string): Promise<void> {
@@ -485,8 +525,7 @@ export class BotUpdate {
           return desc;
         }
         const nested = maybe.response as Record<string, unknown> | undefined;
-        const nestedDesc =
-          nested?.data as Record<string, unknown> | undefined;
+        const nestedDesc = nested?.data as Record<string, unknown> | undefined;
         if (typeof nestedDesc?.description === 'string') {
           return nestedDesc.description as string;
         }
