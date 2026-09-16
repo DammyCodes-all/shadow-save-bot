@@ -20,10 +20,16 @@ import { validateEnvironment } from './config/env.validation';
         type: 'postgres',
         url: configService.getOrThrow<string>('DATABASE_URL'),
         autoLoadEntities: true,
-        synchronize: true,
+        // Never auto-sync schema in production: it needs extra DB round
+        // trips on boot (slower cold start) and can alter data. Use
+        // migrations for prod; keep sync for local dev only.
+        synchronize: process.env.NODE_ENV !== 'production',
         extra: {
           ssl: { rejectUnauthorized: false },
-          connectionTimeoutMillis: 30000,
+          // Fail fast so a dead Neon endpoint rejects instead of holding
+          // NestFactory.create (and the port handover) for 30s+. The
+          // placeholder /health keeps answering while this retries.
+          connectionTimeoutMillis: 10000,
           idleTimeoutMillis: 60000,
           keepAlive: true,
           keepAliveInitialDelayMillis: 10000,
