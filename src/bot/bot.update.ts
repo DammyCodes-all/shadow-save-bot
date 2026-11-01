@@ -25,6 +25,18 @@ export class BotUpdate {
 
   @Start()
   async onStart(@Ctx() ctx: Context) {
+    if (ctx.from && !this.botService.isAdmin(ctx.from.id)) {
+      try {
+        if (await this.userService.isBanned(ctx.from.id)) {
+          await ctx.reply(this.botService.getBannedMessage());
+          return;
+        }
+      } catch (error) {
+        this.logger.warn(
+          `Ban check failed on /start for ${ctx.from.id}: ${error instanceof Error ? error.message : 'unknown error'}`,
+        );
+      }
+    }
     await ctx.reply(this.botService.getWelcomeMessage());
   }
 
@@ -69,6 +81,80 @@ export class BotUpdate {
     }
   }
 
+  @Command('ban')
+  async onBan(@Ctx() ctx: Context) {
+    if (!ctx.from || !this.botService.isAdmin(ctx.from.id)) {
+      return;
+    }
+
+    const target = this.parseBanTarget(ctx);
+    if (target === null) {
+      await ctx.reply('Usage: /ban @username or <telegram_user_id>');
+      return;
+    }
+
+    try {
+      if (target.kind === 'username') {
+        const user = await this.userService.banUserByUsername(target.username);
+        if (!user) {
+          await ctx.reply(`User @${target.username} not found.`);
+          return;
+        }
+        await ctx.reply(`🚫 @${user.username ?? target.username} has been banned.`);
+      } else {
+        const user = await this.userService.banUser(target.telegramId);
+        if (!user) {
+          await ctx.reply(`User ${target.telegramId} not found.`);
+          return;
+        }
+        const label = user.username ? `@${user.username}` : `${target.telegramId}`;
+        await ctx.reply(`🚫 ${label} has been banned.`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'unknown error';
+      this.logger.error(`Ban failed for ${JSON.stringify(target)}: ${message}`);
+      await ctx.reply('❌ Failed to ban user. Try again.');
+    }
+  }
+
+  @Command('unban')
+  async onUnban(@Ctx() ctx: Context) {
+    if (!ctx.from || !this.botService.isAdmin(ctx.from.id)) {
+      return;
+    }
+
+    const target = this.parseBanTarget(ctx);
+    if (target === null) {
+      await ctx.reply('Usage: /unban @username or <telegram_user_id>');
+      return;
+    }
+
+    try {
+      if (target.kind === 'username') {
+        const user = await this.userService.unbanUserByUsername(target.username);
+        if (!user) {
+          await ctx.reply(`User @${target.username} not found.`);
+          return;
+        }
+        await ctx.reply(
+          `✅ @${user.username ?? target.username} has been unbanned.`,
+        );
+      } else {
+        const user = await this.userService.unbanUser(target.telegramId);
+        if (!user) {
+          await ctx.reply(`User ${target.telegramId} not found.`);
+          return;
+        }
+        const label = user.username ? `@${user.username}` : `${target.telegramId}`;
+        await ctx.reply(`✅ ${label} has been unbanned.`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'unknown error';
+      this.logger.error(`Unban failed for ${JSON.stringify(target)}: ${message}`);
+      await ctx.reply('❌ Failed to unban user. Try again.');
+    }
+  }
+
   @On('text')
   async onText(@Ctx() ctx: Context) {
     const message = ctx.message;
@@ -81,6 +167,19 @@ export class BotUpdate {
 
     if (text.startsWith('/')) {
       return;
+    }
+
+    if (!this.botService.isAdmin(ctx.from.id)) {
+      try {
+        if (await this.userService.isBanned(ctx.from.id)) {
+          await ctx.reply(this.botService.getBannedMessage());
+          return;
+        }
+      } catch (error) {
+        this.logger.warn(
+          `Ban check failed for ${ctx.from.id}: ${error instanceof Error ? error.message : 'unknown error'}`,
+        );
+      }
     }
 
     if (this.broadcastComposers.has(ctx.from.id)) {
@@ -386,6 +485,32 @@ export class BotUpdate {
     }
   }
 
+  private parseBanTarget(
+    ctx: Context,
+  ): { kind: 'username'; username: string } | { kind: 'id'; telegramId: number } | null {
+    const message = ctx.message;
+    if (!message || !('text' in message)) {
+      return null;
+    }
+    const parts = message.text.trim().split(/\s+/);
+    if (parts.length < 2 || !parts[1]) {
+      return null;
+    }
+    const raw = parts[1].trim();
+    if (/^\d+$/.test(raw)) {
+      const telegramId = Number(raw);
+      if (!Number.isSafeInteger(telegramId) || telegramId <= 0) {
+        return null;
+      }
+      return { kind: 'id', telegramId };
+    }
+    const username = raw.replace(/^@/, '').trim();
+    if (!username || !/^[A-Za-z0-9_]{1,32}$/.test(username)) {
+      return null;
+    }
+    return { kind: 'username', username };
+  }
+
   private isTelegramFetchError(error: unknown): boolean {
     const message =
       error instanceof Error
@@ -428,6 +553,20 @@ export class BotUpdate {
 
   @Action(/^audio:(.+)$/)
   async onAudioAction(@Ctx() ctx: Context) {
+    if (ctx.from && !this.botService.isAdmin(ctx.from.id)) {
+      try {
+        if (await this.userService.isBanned(ctx.from.id)) {
+          await ctx.answerCbQuery('You have been banned').catch(() => {});
+          await ctx.reply(this.botService.getBannedMessage()).catch(() => {});
+          return;
+        }
+      } catch (error) {
+        this.logger.warn(
+          `Ban check failed on audio action for ${ctx.from.id}: ${error instanceof Error ? error.message : 'unknown error'}`,
+        );
+      }
+    }
+
     const callbackQuery = ctx.callbackQuery as unknown as
       | { data?: string }
       | undefined;
@@ -527,7 +666,7 @@ export class BotUpdate {
         const nested = maybe.response as Record<string, unknown> | undefined;
         const nestedDesc = nested?.data as Record<string, unknown> | undefined;
         if (typeof nestedDesc?.description === 'string') {
-          return nestedDesc.description as string;
+          return nestedDesc.description;
         }
       }
       return String(err ?? '');
