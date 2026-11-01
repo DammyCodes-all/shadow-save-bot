@@ -32,6 +32,14 @@ export class BotService {
     return `😔 This file is a bit too large to send here (Telegram's 50 MB limit).\nSend me a shorter video and I'll grab it for you!`;
   }
 
+  getBannedMessage(): string {
+    return (
+      `🚫 You have been banned.\n\n` +
+      `You have been banned due to misuse or a violation of our fair-use policy.\n` +
+      `You can no longer download media with this bot.`
+    );
+  }
+
   getAudioFileTooLargeMessage(_platform: SocialPlatform): string {
     return `😔 This audio is a bit too large to send (50 MB limit).\nTry another video — I'll get it for you right away!`;
   }
