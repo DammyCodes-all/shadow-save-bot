@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, MoreThanOrEqual, In } from 'typeorm';
+import { Repository, DataSource, MoreThanOrEqual, In, ILike } from 'typeorm';
 import { UserEntity } from './entities/user.entity';
 import { DownloadEventEntity } from './entities/download-event.entity';
 import type { SocialPlatform } from '../download/providers/social-media-provider.interface';
@@ -96,6 +96,55 @@ export class UserService implements OnModuleInit {
 
   async incrementDownloadCount(telegramId: number): Promise<void> {
     await this.userRepo.increment({ telegramId }, 'totalDownloads', 1);
+  }
+
+  async isBanned(telegramId: number): Promise<boolean> {
+    const user = await this.userRepo.findOneBy({ telegramId });
+    return user?.isBanned ?? false;
+  }
+
+  async banUser(telegramId: number): Promise<UserEntity | null> {
+    const user = await this.userRepo.findOneBy({ telegramId });
+    if (!user) {
+      return null;
+    }
+    user.isBanned = true;
+    return this.userRepo.save(user);
+  }
+
+  async unbanUser(telegramId: number): Promise<UserEntity | null> {
+    const user = await this.userRepo.findOneBy({ telegramId });
+    if (!user) {
+      return null;
+    }
+    user.isBanned = false;
+    return this.userRepo.save(user);
+  }
+
+  async findByUsername(username: string): Promise<UserEntity | null> {
+    const clean = username.replace(/^@/, '').trim();
+    if (!clean) {
+      return null;
+    }
+    return this.userRepo.findOne({ where: { username: ILike(clean) } });
+  }
+
+  async banUserByUsername(username: string): Promise<UserEntity | null> {
+    const user = await this.findByUsername(username);
+    if (!user) {
+      return null;
+    }
+    user.isBanned = true;
+    return this.userRepo.save(user);
+  }
+
+  async unbanUserByUsername(username: string): Promise<UserEntity | null> {
+    const user = await this.findByUsername(username);
+    if (!user) {
+      return null;
+    }
+    user.isBanned = false;
+    return this.userRepo.save(user);
   }
 
   async getAllNonBannedUserIds(): Promise<number[]> {
