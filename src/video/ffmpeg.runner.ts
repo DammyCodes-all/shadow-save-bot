@@ -173,17 +173,22 @@ export class FfmpegRunner implements OnModuleInit, OnModuleDestroy {
             );
           }
         });
-        child.on('close', (code) => {
+        child.on('close', (code, signal) => {
           if (!settled) {
             settled = true;
             clearTimeout(timer);
             if (code === 0) {
               resolve();
             } else {
+              const killed = code === null && signal ? ` by ${signal}` : '';
+              const oomHint =
+                signal === 'SIGKILL'
+                  ? ' The process was killed, most likely out of memory — try VIDEO_PRESET=ultrafast or a smaller VIDEO_WIDTH/VIDEO_HEIGHT.'
+                  : '';
               reject(
                 new VideoExportError(
                   'VIDEO_RENDER_FAILED',
-                  `ffmpeg exited with code ${code}. ${stderr.slice(-STDERR_TAIL_BYTES)}`,
+                  `ffmpeg exited${killed} with code ${code}.${oomHint} ${stderr.slice(-STDERR_TAIL_BYTES)}`,
                 ),
               );
             }
