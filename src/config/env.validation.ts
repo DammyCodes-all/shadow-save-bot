@@ -51,9 +51,10 @@ export function validateEnvironment(
   }
 
   return {
+    ...config,
     TELEGRAM_BOT_API_KEY: telegramBotApiKey,
     TELEGRAM_BOT_USERNAME: telegramBotUsername,
     DATABASE_URL: databaseUrl,
     ADMIN_IDS: parsedAdminIds,
-  };
+  } as unknown as Environment;
 }
