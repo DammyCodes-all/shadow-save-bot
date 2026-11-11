@@ -181,7 +181,7 @@ export class VideoRenderService implements OnModuleInit, OnModuleDestroy {
             jobDir,
           );
           this.logger.log(
-            `job ${jobId} tiktok images=${normalized.length} perSlide=${timing.perSlideSec}s transition=${timing.transitionSec}s total=${timing.totalSec}s audio=${musicFile ? 'yes' : 'no'}`,
+            `job ${jobId} tiktok images=${normalized.length} perSlide=${timing.perSlideSec}s transition=${timing.transitionSec}s total=${timing.totalSec}s audio=${musicFile ? 'yes' : 'no'} preset=${config.preset} ${config.width}x${config.height}`,
           );
           await this.ffmpeg.run(
             buildTikTokArgs({
