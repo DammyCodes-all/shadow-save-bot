@@ -60,6 +60,8 @@ export class InstagramProvider implements SocialMediaProvider {
         images: images.length > 0 ? images : null,
         music: '',
         author: data.username ?? '',
+        musicDurationSec: null,
+        musicTitle: null,
       };
     } catch (error) {
       if (error instanceof HttpException) {
