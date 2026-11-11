@@ -1,8 +1,13 @@
 import { randomBytes } from 'crypto';
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
 import { Action, Ctx, On, Start, Command, Update } from 'nestjs-telegraf';
 import { Context } from 'telegraf';
-import { BotService } from './bot.service.js';
+import { BotService } from './bot.service';
 import { BroadcastService } from './broadcast.service';
 import { DownloadService } from '../download/download.service';
 import type { SocialPlatform } from '../download/providers/social-media-provider.interface';
@@ -28,7 +33,7 @@ type ReportDraft = {
 
 @Update()
 @Injectable()
-export class BotUpdate {
+export class BotUpdate implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(BotUpdate.name);
   private readonly broadcastComposers = new Set<number>();
   private readonly audioRequests = new Map<
@@ -37,9 +42,11 @@ export class BotUpdate {
   >();
   private readonly reportContexts = new Map<string, ReportContext>();
   private readonly reportDrafts = new Map<number, ReportDraft>();
+  private draftSweepTimer?: NodeJS.Timeout;
 
   private static readonly REPORT_CONTEXT_TTL_MS = 30 * 60 * 1000;
   private static readonly REPORT_DRAFT_TTL_MS = 30 * 60 * 1000;
+  private static readonly REPORT_DRAFT_SWEEP_MS = 60 * 1000;
   private static readonly MAX_REPORT_CONTEXTS = 500;
 
   constructor(
@@ -51,6 +58,26 @@ export class BotUpdate {
     private readonly reportNotifier: ReportNotifierService,
     private readonly reportPresenter: ReportPresenter,
   ) {}
+
+  onModuleInit(): void {
+    this.draftSweepTimer = setInterval(() => {
+      this.pruneExpiredReportDrafts();
+    }, BotUpdate.REPORT_DRAFT_SWEEP_MS);
+
+    if (
+      typeof (this.draftSweepTimer as unknown as { unref?: () => void })
+        .unref === 'function'
+    ) {
+      (this.draftSweepTimer as unknown as { unref: () => void }).unref();
+    }
+  }
+
+  onModuleDestroy(): void {
+    if (this.draftSweepTimer) {
+      clearInterval(this.draftSweepTimer);
+      this.draftSweepTimer = undefined;
+    }
+  }
 
   @Start()
   async onStart(@Ctx() ctx: Context) {
@@ -66,6 +93,11 @@ export class BotUpdate {
         );
       }
     }
+
+    if (ctx.from) {
+      this.clearReportState(ctx.from.id);
+    }
+
     await ctx.reply(this.botService.getWelcomeMessage());
   }
 
@@ -217,11 +249,16 @@ export class BotUpdate {
       ) {
         this.reportDrafts.delete(ctx.from.id);
       } else {
-        await ctx.reply(
-          existingDraft.contextToken
-            ? this.botService.getReportContextPromptMessage()
-            : this.botService.getReportPromptMessage(),
-        );
+        if (existingDraft.contextToken) {
+          await ctx.reply(
+            this.botService.getReportContextPromptMessage(),
+            this.botService.getReportSkipMarkup(
+              existingDraft.contextToken,
+            ) as never,
+          );
+        } else {
+          await ctx.reply(this.botService.getReportPromptMessage());
+        }
         return;
       }
     }
@@ -354,11 +391,7 @@ export class BotUpdate {
       return;
     }
 
-    const draft = this.reportDrafts.get(ctx.from.id);
-    if (draft?.contextToken) {
-      this.reportContexts.delete(draft.contextToken);
-    }
-    const hadReport = this.reportDrafts.delete(ctx.from.id);
+    const hadReport = this.clearReportState(ctx.from.id);
 
     if (hadReport) {
       await ctx.reply(this.botService.getReportCancelledMessage());
@@ -384,11 +417,13 @@ export class BotUpdate {
       return;
     }
 
-    const context = draft.contextToken
-      ? this.reportContexts.get(draft.contextToken)
-      : null;
+    if (!draft.contextToken) {
+      await ctx.reply(this.botService.getReportSkipNeedsDescriptionMessage());
+      return;
+    }
 
-    if (!draft.contextToken || !context) {
+    const context = this.reportContexts.get(draft.contextToken);
+    if (!context) {
       this.reportDrafts.delete(ctx.from.id);
       await ctx.reply(this.botService.getReportExpiredMessage());
       return;
@@ -796,6 +831,24 @@ export class BotUpdate {
     return draft;
   }
 
+  private clearReportState(userId: number): boolean {
+    const draft = this.reportDrafts.get(userId);
+    if (draft?.contextToken) {
+      this.reportContexts.delete(draft.contextToken);
+    }
+
+    return this.reportDrafts.delete(userId);
+  }
+
+  private pruneExpiredReportDrafts(): void {
+    const now = Date.now();
+    for (const [userId, draft] of this.reportDrafts) {
+      if (now - draft.createdAt > BotUpdate.REPORT_DRAFT_TTL_MS) {
+        this.reportDrafts.delete(userId);
+      }
+    }
+  }
+
   private async submitReportFromDraft(
     ctx: Context,
     description: string,
@@ -815,12 +868,18 @@ export class BotUpdate {
       : null;
 
     if (!description.trim() && !context) {
-      this.reportDrafts.delete(ctx.from.id);
       if (draft.contextToken) {
+        this.reportDrafts.delete(ctx.from.id);
         await ctx.reply(this.botService.getReportExpiredMessage());
       } else {
         await ctx.reply(this.botService.getReportPromptMessage());
       }
+      return;
+    }
+
+    if (context && context.userId !== ctx.from.id) {
+      this.reportDrafts.delete(ctx.from.id);
+      await ctx.reply(this.botService.getReportExpiredMessage());
       return;
     }
 
@@ -872,18 +931,30 @@ export class BotUpdate {
         );
       });
 
-      await ctx.reply(this.botService.getReportThanksMessage(report.shortId));
+      try {
+        await ctx.reply(this.botService.getReportThanksMessage(report.shortId));
+      } catch (error) {
+        // The report is already persisted. A failed confirmation must not
+        // make the caller keep the draft and submit a duplicate on retry.
+        this.logger.warn(
+          `Report ${report.shortId} saved but confirmation reply failed: ${this.describeError(error)}`,
+        );
+      }
       return true;
     } catch (error) {
       if (error instanceof ReportRateLimitError) {
-        await ctx.reply(this.botService.getReportRateLimitMessage(error.kind));
+        await ctx
+          .reply(this.botService.getReportRateLimitMessage(error.kind))
+          .catch(() => {});
         return false;
       }
 
       this.logger.error(
         `Failed to save report for ${ctx.from.id}: ${this.describeError(error)}`,
       );
-      await ctx.reply(this.botService.getReportSaveFailedMessage());
+      await ctx
+        .reply(this.botService.getReportSaveFailedMessage())
+        .catch(() => {});
       return false;
     }
   }
@@ -1118,7 +1189,11 @@ export class BotUpdate {
     const context = this.reportContexts.get(token);
 
     if (!draft || draft.contextToken !== token || !context) {
-      this.reportDrafts.delete(ctx.from.id);
+      // Only clear the draft this button belongs to. A stale Skip button must
+      // never cancel a newer report the user has since started.
+      if (draft?.contextToken === token) {
+        this.reportDrafts.delete(ctx.from.id);
+      }
       await ctx
         .answerCbQuery(this.botService.getReportExpiredMessage())
         .catch(() => {});

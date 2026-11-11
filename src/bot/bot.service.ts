@@ -277,6 +277,10 @@ export class BotService {
     return 'There is no report to skip. Use /report to start one.';
   }
 
+  getReportSkipNeedsDescriptionMessage(): string {
+    return 'There is nothing to skip yet. Send a short description of the problem, or /cancel to stop.';
+  }
+
   getReportExpiredMessage(): string {
     return 'This report link expired. Use /report to send a new one.';
   }
