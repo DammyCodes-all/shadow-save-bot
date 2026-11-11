@@ -56,6 +56,50 @@ export class BotService {
     return adminIds.includes(telegramId);
   }
 
+  getUserCommands(): Array<{ command: string; description: string }> {
+    return [
+      { command: 'start', description: 'Start the bot' },
+      {
+        command: 'report',
+        description: 'Report a problem to the admins',
+      },
+      {
+        command: 'cancel',
+        description: 'Cancel a report in progress',
+      },
+    ];
+  }
+
+  getAdminCommands(): Array<{ command: string; description: string }> {
+    return [
+      { command: 'start', description: 'Start the bot' },
+      {
+        command: 'report',
+        description: 'Report a problem to the admins',
+      },
+      {
+        command: 'reports',
+        description: 'List open error reports',
+      },
+      {
+        command: 'resolve',
+        description: 'Resolve an error report',
+      },
+      {
+        command: 'cancel',
+        description: 'Cancel a report in progress',
+      },
+      { command: 'stats', description: 'Show bot statistics' },
+      {
+        command: 'broadcast',
+        description: 'Send a message to all users',
+      },
+      { command: 'exit', description: 'Exit broadcast mode' },
+      { command: 'ban', description: 'Ban a user' },
+      { command: 'unban', description: 'Unban a user' },
+    ];
+  }
+
   getStatsMessage(stats: {
     totalUsers: number;
     totalDownloads: number;
@@ -190,6 +234,104 @@ export class BotService {
             {
               text: '🎧 Get audio',
               callback_data: audioCallbackData,
+            },
+          ],
+        ],
+      },
+    };
+  }
+
+  getReportPromptMessage(): string {
+    return '🛠 What went wrong?\n\nSend me a short description of the problem. If you can, include the link you tried.\n\nSend /cancel to stop.';
+  }
+
+  getReportContextPromptMessage(): string {
+    return "🛠 What went wrong?\n\nI've already attached the link and error details. Send me a short description, or tap Skip.";
+  }
+
+  getReportThanksMessage(shortId: string): string {
+    return `✅ Thanks — report #${shortId} sent to the admins.`;
+  }
+
+  getReportSaveFailedMessage(): string {
+    return "❌ Couldn't save your report right now. Please try again in a minute.";
+  }
+
+  getReportRateLimitMessage(kind: 'cooldown' | 'daily'): string {
+    if (kind === 'cooldown') {
+      return '⏳ You just sent a report. Please wait a minute before sending another.';
+    }
+
+    return "You've reached today's report limit (5). Please try again tomorrow.";
+  }
+
+  getReportCancelledMessage(): string {
+    return 'Report cancelled.';
+  }
+
+  getReportNothingToCancelMessage(): string {
+    return 'Nothing to cancel.';
+  }
+
+  getReportNothingToSkipMessage(): string {
+    return 'There is no report to skip. Use /report to start one.';
+  }
+
+  getReportExpiredMessage(): string {
+    return 'This report link expired. Use /report to send a new one.';
+  }
+
+  getReportNotFoundMessage(): string {
+    return 'Report not found.';
+  }
+
+  getReportsEmptyMessage(): string {
+    return '🛠 No open reports. 🎉';
+  }
+
+  getReportResolvedMessage(shortId: string): string {
+    return `✅ Report #${shortId} marked as resolved.`;
+  }
+
+  getReportAlreadyResolvedMessage(
+    shortId: string,
+    resolvedByName?: string | null,
+  ): string {
+    const by = resolvedByName ? ` by ${resolvedByName}` : '';
+    return `Report #${shortId} is already resolved${by}.`;
+  }
+
+  getReportButtonMarkup(reportToken: string): {
+    reply_markup: {
+      inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
+    };
+  } {
+    return {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            {
+              text: '🛠 Report this problem',
+              callback_data: `report:new:${reportToken}`,
+            },
+          ],
+        ],
+      },
+    };
+  }
+
+  getReportSkipMarkup(reportToken: string): {
+    reply_markup: {
+      inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
+    };
+  } {
+    return {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            {
+              text: 'Skip',
+              callback_data: `report:skip:${reportToken}`,
             },
           ],
         ],
