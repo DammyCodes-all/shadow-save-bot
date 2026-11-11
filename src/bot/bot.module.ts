@@ -9,6 +9,7 @@ import { BroadcastService } from './broadcast.service';
 import { DownloadModule } from '../download/download.module';
 import { UserModule } from '../user/user.module';
 import { ReportModule } from '../report/report.module';
+import { VideoModule } from '../video/video.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { ReportModule } from '../report/report.module';
     DownloadModule,
     UserModule,
     ReportModule,
+    VideoModule,
     TelegrafModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
