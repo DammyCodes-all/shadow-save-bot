@@ -6,6 +6,7 @@ import { AppService } from './app.service';
 import { BotModule } from './bot/bot.module';
 import { DownloadModule } from './download/download.module';
 import { UserModule } from './user/user.module';
+import { ReportModule } from './report/report.module';
 import { validateEnvironment } from './config/env.validation';
 
 @Module({
@@ -41,6 +42,7 @@ import { validateEnvironment } from './config/env.validation';
       }),
     }),
     UserModule,
+    ReportModule,
     BotModule,
     DownloadModule,
   ],
