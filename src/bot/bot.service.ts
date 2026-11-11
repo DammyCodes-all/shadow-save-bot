@@ -1,13 +1,18 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { SocialPlatform } from '../download/providers/social-media-provider.interface';
+import type {
+  RenderResult,
+  VideoPlatform,
+  VideoRequest,
+} from '../video/video.types';
 
 @Injectable()
 export class BotService {
   constructor(private readonly configService: ConfigService) {}
 
   getWelcomeMessage(): string {
-    return "Hi there! Welcome to Shadow Save Bot.\n\nSend a supported social media link and I'll try to fetch the media for you.\n\nCurrently best supported: TikTok\nTwitter/X support is integrated.\n\nExample:\nhttps://vm.tiktok.com/XXXXXXX/";
+    return "Hi there! Welcome to Shadow Save Bot.\n\nSend a supported social media link and I'll try to fetch the media for you.\n\nCurrently best supported: TikTok\nTwitter/X support is integrated.\n\nFor slideshows, tap 🎬 Make video to get an MP4.\n\nExample:\nhttps://vm.tiktok.com/XXXXXXX/";
   }
 
   getUnsupportedLinkMessage(supportedPlatforms: SocialPlatform[]): string {
@@ -143,7 +148,13 @@ export class BotService {
       lines.push('🎞️ By type:');
       for (const m of stats.perMediaType) {
         const label =
-          m.type === 'video' ? 'Video' : m.type === 'image' ? 'Image' : m.type;
+          m.type === 'video'
+            ? 'Video'
+            : m.type === 'image'
+              ? 'Image'
+              : m.type === 'video_export'
+                ? 'Video export'
+                : m.type;
         lines.push(`   • ${label}: ${m.count.toLocaleString()}`);
       }
     }
@@ -239,6 +250,93 @@ export class BotService {
         ],
       },
     };
+  }
+
+  getSlideshowActionsMessage(
+    platform: VideoPlatform,
+    hasAudio: boolean,
+  ): string {
+    if (platform === 'instagram') {
+      return '🎬 Want this carousel as an auto-scroll video?';
+    }
+    return hasAudio
+      ? '🎬 Want this slideshow as a video with the original sound?'
+      : '🎬 Want this slideshow as a video?';
+  }
+
+  getSlideshowActionsMarkup(
+    videoToken: string | null,
+    audioCallbackData?: string | null,
+  ): {
+    reply_markup: {
+      inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
+    };
+  } {
+    const keyboard: Array<Array<{ text: string; callback_data: string }>> = [];
+    if (videoToken) {
+      keyboard.push([
+        {
+          text: '🎬 Make video',
+          callback_data: `slideshow:video:${videoToken}`,
+        },
+      ]);
+    }
+    if (audioCallbackData) {
+      keyboard.push([
+        { text: '🎧 Get audio', callback_data: audioCallbackData },
+      ]);
+    }
+    return { reply_markup: { inline_keyboard: keyboard } };
+  }
+
+  getSlideshowVideoCaption(
+    result: RenderResult,
+    request: VideoRequest,
+  ): string {
+    const base =
+      request.platform === 'instagram'
+        ? '🎬 Instagram carousel · auto-scroll · silent'
+        : result.hasAudio
+          ? '🎬 TikTok slideshow · original sound'
+          : request.music
+            ? '🎬 TikTok slideshow · silent (sound unavailable)'
+            : '🎬 TikTok slideshow';
+    const suffix = [request.title, request.author]
+      .map((part) => part?.trim())
+      .filter((part) => part && part.length > 0)
+      .join(' · ');
+    if (!suffix) {
+      return base;
+    }
+    const full = `${base}\n${suffix}`;
+    if (full.length <= 1000) {
+      return full;
+    }
+    return full.slice(0, 999).trimEnd() + '…';
+  }
+
+  getVideoRenderingMessage(): string {
+    return '🎬 Rendering your video…';
+  }
+
+  getVideoExpiredMessage(): string {
+    return 'Couldn’t fetch the slideshow images — they may have expired or loaded too slowly. Send the link again to make a video.';
+  }
+
+  getVideoBusyMessage(): string {
+    return '🎬 Lots of videos are rendering right now. Try again in a minute.';
+  }
+
+  getVideoCooldownMessage(seconds: number): string {
+    return `Please wait ${seconds}s before making another video.`;
+  }
+
+  getVideoFailedMessage(): string {
+    return '😔 Couldn’t build the video. The images or audio may have expired. Try resending the link.';
+  }
+
+  getVideoUnavailableMessage(): string {
+    return 'Video export is temporarily unavailable.';
   }
 
   getReportPromptMessage(): string {
