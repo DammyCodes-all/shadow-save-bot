@@ -27,13 +27,16 @@
     "@nestjs/platform-express": "^11.0.1",
     "@nestjs/typeorm": "^11.0.3",
     "cache-manager": "^7.2.8",
+    "ffmpeg-static": "^5.3.0",
     "nestjs-telegraf": "^2.9.1",
     "pg": "^8.22.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
+    "sharp": "^0.35.5",
     "telegraf": "^4.16.3",
     "typeorm": "^1.0.0",
-    "ultra-igdl": "^1.0.3"
+    "ultra-igdl": "^1.0.3",
+    "undici": "^8.12.4"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
