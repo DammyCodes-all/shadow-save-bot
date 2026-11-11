@@ -145,6 +145,8 @@ export class TiktokProvider implements SocialMediaProvider {
         images: null,
         music: '',
         author: '',
+        musicDurationSec: null,
+        musicTitle: null,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'unknown error';
@@ -250,6 +252,11 @@ export class TiktokProvider implements SocialMediaProvider {
       images: isSlideshow ? (data.images ?? []) : null,
       music: data.music ?? '',
       author: data.author?.nickname ?? '',
+      musicDurationSec:
+        data.music_info?.duration && data.music_info.duration > 0
+          ? data.music_info.duration
+          : null,
+      musicTitle: data.music_info?.title ?? null,
     };
   }
 
