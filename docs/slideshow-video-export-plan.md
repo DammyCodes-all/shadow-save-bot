@@ -501,7 +501,7 @@ Add one line: “For slideshows, tap **🎬 Make video** to get an MP4.”
 | `VIDEO_HEIGHT` | `1280` | Output height |
 | `VIDEO_FPS` | `30` | Output frame rate |
 | `VIDEO_CRF` | `26` | x264 quality |
-| `VIDEO_PRESET` | `veryfast` | x264 preset |
+| `VIDEO_PRESET` | `superfast` | x264 preset |
 | `VIDEO_MAX_DURATION_SEC` | `60` | Hard duration cap |
 | `VIDEO_MAX_CONCURRENCY` | CPU-based | Simultaneous renders |
 | `VIDEO_MAX_QUEUE` | `20` | Pending renders |

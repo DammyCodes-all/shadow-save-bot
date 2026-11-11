@@ -86,7 +86,7 @@ export function loadVideoConfig(config: ConfigService): VideoConfig {
 
   const width = readNumber(config, 'VIDEO_WIDTH', 720, 360, 1080);
   const height = readNumber(config, 'VIDEO_HEIGHT', 1280, 640, 1920);
-  const preset = readString(config, 'VIDEO_PRESET', 'veryfast');
+  const preset = readString(config, 'VIDEO_PRESET', 'superfast');
   if (!X264_PRESETS.has(preset)) {
     throw new Error(
       `VIDEO_PRESET must be one of: ${Array.from(X264_PRESETS).join(', ')}`,

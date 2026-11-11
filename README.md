@@ -210,7 +210,7 @@ User error reports and admin triage.
 - Video export is on-demand: images are sent first, then the bot offers an inline "🎬 Make video" button for TikTok/Instagram slideshows with 2+ images (plus single-image TikTok posts with music).
 - TikTok style: photos swipe in from the right with a hard edge on the beat of the original sound (even spread across the audio duration, looped or trimmed with a fade), with TikTok-style progress dots at the bottom tracking the current photo (fixed-size, truncated to a sliding window when there are more photos than fit). A single image is held as a still over the full sound (up to the 60s cap).
 - Instagram style: 2 seconds per slide by default with a short `slideup` transition between images (no tall-strip decoding), silent because the carousel payload has no audio.
-- Output: 720×1280 by default, H.264/AAC, `yuv420p`, `+faststart`, capped at 60 seconds and under Telegram's 50 MB bot-upload limit (with a one-time 540p/CRF 32 fallback).
+- Output: 720×1280 by default, H.264/AAC, `yuv420p`, `+faststart`, capped at 60 seconds and under Telegram's 50 MB bot-upload limit (with automatic step-down: on render failure it retries faster and smaller, down to ultrafast 480p, without changing your config).
 - Concurrency: max 2 simultaneous renders by default (1 on 1–3 vCPU, 2 on 4+ vCPU), with a bounded queue, one active render per user, and a 30-second per-user cooldown.
 - Temp files are written under the OS temp directory and deleted after upload.
 - The renderer is intentionally modest for small/free servers: 720×1280, CRF 26, `veryfast`, one Sharp worker, capped ffmpeg threads, one `slideup` chain for Instagram, and a 60-second ceiling.
@@ -323,7 +323,7 @@ Create a local `.env` file or set environment variables before starting the app.
 | `VIDEO_HEIGHT`                   | `1280`        | Output height                            |
 | `VIDEO_FPS`                      | `30`          | Output frame rate                        |
 | `VIDEO_CRF`                      | `26`          | x264 quality                             |
-| `VIDEO_PRESET`                   | `veryfast`    | x264 preset                              |
+| `VIDEO_PRESET`                   | `superfast`   | x264 preset (fast + low-RAM default)     |
 | `VIDEO_MAX_DURATION_SEC`         | `60`          | Hard duration cap                        |
 | `VIDEO_MAX_CONCURRENCY`          | CPU-based     | Simultaneous renders (1 vCPU → 1, 4+ vCPU → 2) |
 | `VIDEO_MAX_QUEUE`                | `20`          | Pending renders                          |
