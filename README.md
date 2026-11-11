@@ -2,7 +2,7 @@
 
 Built with 💜 by aluminate
 
-Shadow Save Bot is  a NestJS Telegram bot with provider-based multi-social media support. It currently supports TikTok, Twitter/X, and Instagram media extraction and sends content directly in Telegram without saving files to disk.
+Shadow Save Bot is a NestJS Telegram bot with provider-based multi-social media support. It currently supports TikTok, Twitter/X, and Instagram media extraction and sends content directly in Telegram without saving files to disk.
 
 It uses:
 
@@ -42,6 +42,7 @@ The app does not write downloaded media to disk.
 - URL-first extraction fallback for Instagram media delivery
 - Auto-expiring cache cleanup to avoid memory growth
 - Friendly error handling for invalid or private links
+- User-initiated error reports with automatic context capture, Postgres storage, and admin Telegram alerts
 - A "Share with friends" button that shares the bot itself after successful video downloads
 
 ## Architecture
@@ -126,6 +127,18 @@ Telegram update handler.
 - Retries Twitter/X videos through fallback URLs in quality order when Telegram rejects the first attempt
 - Keeps non-Twitter multi-video batching behavior intact
 - Replies with a friendly error when download fails
+- Adds a "Report this problem" button to genuine download failures
+- Handles `/report`, `/reports`, `/resolve`, `/cancel`, and `/skip`
+
+#### `ReportModule`
+
+User error reports and admin triage.
+
+- `ReportService` creates, lists, and resolves reports
+- `ReportNotifierService` sends new reports to every `ADMIN_IDS` admin with a Resolve button
+- `ReportPresenter` formats the admin alert, report list, and report detail
+- Enforces a one-per-minute cooldown and a five-per-day limit per user
+- Stores a sanitized snapshot of the reporter, link, platform, error code, and description
 
 ## Data model
 
@@ -229,19 +242,30 @@ src/
       twitter.provider.ts
       instagram.provider.ts
       twitter.types.ts
+  report/
+    report.module.ts
+    report.service.ts
+    report-notifier.service.ts
+    report.presenter.ts
+    entities/
+      error-report.entity.ts
   config/
     env.validation.ts
+migrations/
+  001_create_shadow_save_error_reports.sql
 ```
 
 ## Environment variables
 
 Create a local `.env` file or set environment variables before starting the app.
 
-| Variable                | Required | Description                                    |
-| ----------------------- | -------- | ---------------------------------------------- |
-| `TELEGRAM_BOT_API_KEY`  | Yes      | Telegram bot token from BotFather              |
-| `TELEGRAM_BOT_USERNAME` | Yes      | Bot username used for the share button invite  |
-| `PORT`                  | No       | HTTP port for the Nest app, defaults to `3000` |
+| Variable                | Required | Description                                                            |
+| ----------------------- | -------- | ---------------------------------------------------------------------- |
+| `TELEGRAM_BOT_API_KEY`  | Yes      | Telegram bot token from BotFather                                      |
+| `TELEGRAM_BOT_USERNAME` | Yes      | Bot username used for the share button invite                          |
+| `DATABASE_URL`          | Yes      | Postgres connection string used by TypeORM                             |
+| `ADMIN_IDS`             | Yes      | Comma-separated Telegram user IDs for admin commands and report alerts |
+| `PORT`                  | No       | HTTP port for the Nest app, defaults to `3000`                         |
 
 ## Setup
 
@@ -300,12 +324,61 @@ The bot returns a friendly error message when:
 - the source link is private, expired, or otherwise unavailable
 - Telegram cannot send the final media payload
 
+## Error reports
+
+When a genuine download failure happens, the failure message includes a **"🛠 Report this problem"** button. The bot already knows the link, platform, and error details, so the user only has to add a short description (or tap Skip).
+
+Users can also send `/report` at any time. The next text message becomes the report.
+
+### What a report contains
+
+- Telegram ID, username, and first name (snapshot at report time)
+- The URL and detected platform
+- A short error code (`DOWNLOAD_FAILED`, `NO_MEDIA`, `TELEGRAM_FETCH_FAILED`, `USER_REPORT`)
+- A sanitized one-line error detail
+- The user's description
+- Timestamps and resolution status
+
+Reports never include media files, chat history, or other users' messages. Bot tokens are redacted from error text before it is stored or shown.
+
+### Where reports go
+
+1. The `shadow_save_error_reports` table in Postgres is the permanent record.
+2. A formatted alert is sent as a Telegram DM to every ID in `ADMIN_IDS`, with a **"✅ Mark resolved"** button.
+3. If the DM cannot be delivered, the report is still saved and visible through `/reports`.
+
+### Admin commands
+
+| Command         | Description                                              |
+| --------------- | -------------------------------------------------------- |
+| `/reports`      | List the 10 most recent open reports                     |
+| `/reports all`  | List the 10 most recent reports, including resolved ones |
+| `/reports <id>` | Show one report in full                                  |
+| `/resolve <id>` | Mark a report as resolved                                |
+
+The Resolve button on an admin alert does the same thing as `/resolve`: it changes the report from `open` to `resolved`, records who closed it and when, and removes it from the default `/reports` list. It does not delete the report or message the user who filed it.
+
+### Rate limits
+
+- One report per minute per user
+- Five reports per day per user
+- Banned users cannot file reports
+
+### Database migration
+
+Local development uses TypeORM `synchronize`, so the table is created automatically. Production runs with `synchronize: false`; apply the migration once before deploying:
+
+```bash
+psql "$DATABASE_URL" -f migrations/001_create_shadow_save_error_reports.sql
+```
+
 ## Current limitations
 
 - Cache is process-local only
 - Cache is cleared on restart
 - Media URLs returned by TikWM can expire, so cached results are intentionally short-lived
 - The app is optimized for a single bot instance
+- Report drafts and failure-button contexts are process-local and expire after 30 minutes; a restart clears them
 
 ## Development notes
 
