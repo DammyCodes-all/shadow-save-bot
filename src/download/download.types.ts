@@ -11,6 +11,10 @@ export type TikwmResponse = {
     author?: {
       nickname?: string;
     };
+    music_info?: {
+      title?: string;
+      duration?: number;
+    };
   };
 };
 
@@ -23,4 +27,6 @@ export type MediaInfo = {
   images: string[] | null;
   music: string;
   author: string;
+  musicDurationSec?: number | null;
+  musicTitle?: string | null;
 };
