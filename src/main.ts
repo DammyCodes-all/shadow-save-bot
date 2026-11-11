@@ -1,4 +1,11 @@
 import { createServer, IncomingMessage, ServerResponse } from 'http';
+import { setDefaultAutoSelectFamilyAttemptTimeout } from 'net';
+
+// Neon resolves to both IPv4 and IPv6. On hosts without working IPv6, Node's
+// default 250ms per-address budget can abort slow-but-valid IPv4 connects and
+// surface as a blank `AggregateError [ETIMEDOUT]` on the first DB query.
+// Give each address family enough time to finish before falling through.
+setDefaultAutoSelectFamilyAttemptTimeout(2000);
 
 // NOTE: this entry intentionally has NO static Nest/TypeORM imports.
 // Static imports are hoisted and would force Node to load the whole
