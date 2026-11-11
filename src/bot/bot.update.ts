@@ -10,12 +10,21 @@ import { Context } from 'telegraf';
 import { BotService } from './bot.service';
 import { BroadcastService } from './broadcast.service';
 import { DownloadService } from '../download/download.service';
+import type { MediaInfo } from '../download/download.types';
 import type { SocialPlatform } from '../download/providers/social-media-provider.interface';
 import { UserService } from '../user/user.service';
 import { ReportNotifierService } from '../report/report-notifier.service';
 import { ReportPresenter } from '../report/report.presenter';
 import { ReportRateLimitError, ReportService } from '../report/report.service';
 import type { ErrorReportCode } from '../report/report.service';
+import { VideoRenderService } from '../video/video-render.service';
+import { VideoRequestStore } from '../video/video-request.store';
+import { VideoExportError } from '../video/video.types';
+import type {
+  RenderResult,
+  VideoPlatform,
+  VideoRequest,
+} from '../video/video.types';
 
 type ReportContext = {
   userId: number;
@@ -57,6 +66,8 @@ export class BotUpdate implements OnModuleInit, OnModuleDestroy {
     private readonly reportService: ReportService,
     private readonly reportNotifier: ReportNotifierService,
     private readonly reportPresenter: ReportPresenter,
+    private readonly videoRenderService: VideoRenderService,
+    private readonly videoRequestStore: VideoRequestStore,
   ) {}
 
   onModuleInit(): void {
@@ -509,6 +520,40 @@ export class BotUpdate implements OnModuleInit, OnModuleDestroy {
                 ? this.botService.getMediaReplyMarkup(tiktokAudioCallback)
                 : this.botService.getShareWithFriendsMarkup();
               await ctx.replyWithPhoto(mediaInfo.images[0], markup as never);
+
+              // A single TikTok image with music can still become a video:
+              // a still held over the full sound.
+              const singleVideoToken =
+                mediaInfo.platform === 'tiktok' &&
+                mediaInfo.music &&
+                this.videoRenderService.isAvailable()
+                  ? this.videoRequestStore.create({
+                      userId: ctx.from.id,
+                      platform: 'tiktok',
+                      url,
+                      images: mediaInfo.images,
+                      music: mediaInfo.music || null,
+                      musicDurationSec: mediaInfo.musicDurationSec ?? null,
+                      musicTitle: mediaInfo.musicTitle ?? null,
+                      title: mediaInfo.title,
+                      author: mediaInfo.author,
+                    })
+                  : null;
+              if (singleVideoToken) {
+                await ctx
+                  .reply(
+                    this.botService.getSlideshowActionsMessage('tiktok', true),
+                    this.botService.getSlideshowActionsMarkup(
+                      singleVideoToken,
+                      null,
+                    ) as never,
+                  )
+                  .catch((error) =>
+                    this.logger.warn(
+                      `Slideshow control message failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+                    ),
+                  );
+              }
             } else {
               for (
                 let index = 0;
@@ -529,13 +574,42 @@ export class BotUpdate implements OnModuleInit, OnModuleDestroy {
                 }
               }
 
-              if (tiktokAudioCallback) {
-                await ctx.reply(
-                  '🎵 Audio for this slideshow',
-                  this.botService.getAudioButtonMarkup(
-                    tiktokAudioCallback,
-                  ) as never,
-                );
+              const videoToken =
+                mediaInfo.images.length >= 2 &&
+                this.isVideoPlatform(mediaInfo.platform) &&
+                this.videoRenderService.isAvailable()
+                  ? this.videoRequestStore.create({
+                      userId: ctx.from.id,
+                      platform: mediaInfo.platform,
+                      url,
+                      images: mediaInfo.images,
+                      music: mediaInfo.music || null,
+                      musicDurationSec: mediaInfo.musicDurationSec ?? null,
+                      musicTitle: mediaInfo.musicTitle ?? null,
+                      title: mediaInfo.title,
+                      author: mediaInfo.author,
+                    })
+                  : null;
+              if (
+                (videoToken || tiktokAudioCallback) &&
+                this.isVideoPlatform(mediaInfo.platform)
+              ) {
+                await ctx
+                  .reply(
+                    this.botService.getSlideshowActionsMessage(
+                      mediaInfo.platform,
+                      Boolean(mediaInfo.music),
+                    ),
+                    this.botService.getSlideshowActionsMarkup(
+                      videoToken,
+                      tiktokAudioCallback,
+                    ) as never,
+                  )
+                  .catch((error) =>
+                    this.logger.warn(
+                      `Slideshow control message failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+                    ),
+                  );
               }
             }
           } catch (error) {
@@ -1010,6 +1084,10 @@ export class BotUpdate implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private isVideoPlatform(platform: SocialPlatform): platform is VideoPlatform {
+    return platform === 'tiktok' || platform === 'instagram';
+  }
+
   private getCallbackData(ctx: Context): string {
     const callbackQuery = ctx.callbackQuery as unknown as
       | { data?: string }
@@ -1338,6 +1416,314 @@ export class BotUpdate implements OnModuleInit, OnModuleDestroy {
         .reply('❌ Failed to send audio. The track may be unavailable.')
         .catch(() => {});
     }
+  }
+
+  @Action(/^slideshow:video:(.+)$/)
+  async onSlideshowVideoAction(@Ctx() ctx: Context) {
+    if (!ctx.from) {
+      return;
+    }
+
+    if (await this.rejectIfBanned(ctx)) {
+      return;
+    }
+
+    const token = /^slideshow:video:(.+)$/.exec(this.getCallbackData(ctx))?.[1];
+    if (!token) {
+      await ctx.answerCbQuery('Invalid video request').catch(() => {});
+      return;
+    }
+
+    const request = this.videoRequestStore.get(token);
+    if (!request) {
+      await ctx
+        .answerCbQuery(this.botService.getVideoExpiredMessage())
+        .catch(() => {});
+      await ctx.reply(this.botService.getVideoExpiredMessage()).catch(() => {});
+      return;
+    }
+
+    if (request.userId !== ctx.from.id) {
+      await ctx
+        .answerCbQuery('This video belongs to another user')
+        .catch(() => {});
+      return;
+    }
+
+    // Marker so a silent tap can be distinguished from a slow render in logs.
+    this.logger.log(
+      `Slideshow video start user=${ctx.from.id} platform=${request.platform} images=${request.images.length} audio=${request.music ? 'yes' : 'no'}`,
+    );
+
+    // Stored CDN URLs expire fast (often within the hour), so re-resolve
+    // the original link into fresh URLs before rendering. Falls back to
+    // the stored URLs when the refresh fails.
+    const liveRequest = await this.refreshSlideshowRequest(request);
+
+    if (!this.videoRenderService.isAvailable()) {
+      await ctx
+        .answerCbQuery(this.botService.getVideoUnavailableMessage())
+        .catch(() => {});
+      await ctx
+        .reply(this.botService.getVideoUnavailableMessage())
+        .catch(() => {});
+      return;
+    }
+
+    let renderPromise: Promise<RenderResult>;
+    try {
+      renderPromise = this.videoRenderService.render(liveRequest);
+    } catch (error) {
+      await this.answerVideoRenderError(ctx, error, liveRequest.platform);
+      return;
+    }
+
+    await ctx.answerCbQuery('🎬 Rendering your video...').catch(() => {});
+
+    const status = await ctx
+      .reply(this.botService.getVideoRenderingMessage())
+      .catch(() => null);
+
+    const heartbeat = setInterval(() => {
+      ctx.sendChatAction('upload_video').catch(() => {});
+    }, 4000);
+    if (
+      typeof (heartbeat as unknown as { unref?: () => void }).unref ===
+      'function'
+    ) {
+      (heartbeat as unknown as { unref: () => void }).unref();
+    }
+
+    let result: RenderResult | null = null;
+    try {
+      result = await renderPromise;
+
+      const audioCallback =
+        liveRequest.platform === 'tiktok' && liveRequest.music
+          ? this.createAudioCallback(liveRequest.music, liveRequest.title)
+          : null;
+
+      const extra = {
+        caption: this.botService.getSlideshowVideoCaption(result, liveRequest),
+        width: result.width,
+        height: result.height,
+        duration: Math.round(result.durationSec),
+        supports_streaming: true,
+        ...this.botService.getMediaReplyMarkup(audioCallback ?? undefined),
+      };
+
+      await ctx.replyWithVideo(
+        {
+          source: result.filePath,
+          filename: `shadowsave-${liveRequest.platform}.mp4`,
+        },
+        extra as never,
+      );
+
+      this.userService
+        .recordEvent({
+          userTelegramId: ctx.from.id,
+          platform: request.platform,
+          mediaType: 'video_export',
+          url: request.url,
+          success: true,
+        })
+        .catch(() => {});
+    } catch (error) {
+      this.userService
+        .recordEvent({
+          userTelegramId: ctx.from.id,
+          platform: request.platform,
+          mediaType: 'video_export',
+          url: request.url,
+          success: false,
+        })
+        .catch(() => {});
+
+      if (error instanceof VideoExportError) {
+        if (error.code === 'VIDEO_TOO_LARGE') {
+          await ctx
+            .reply(this.botService.getFileTooLargeMessage(request.platform))
+            .catch(() => {});
+        } else if (
+          error.code === 'VIDEO_EXPIRED' ||
+          error.code === 'VIDEO_DOWNLOAD_FAILED'
+        ) {
+          await ctx
+            .reply(this.botService.getVideoExpiredMessage())
+            .catch(() => {});
+        } else if (
+          error.code === 'VIDEO_UNAVAILABLE' ||
+          error.code === 'VIDEO_DISABLED'
+        ) {
+          await ctx
+            .reply(this.botService.getVideoUnavailableMessage())
+            .catch(() => {});
+        } else if (
+          error.code === 'VIDEO_QUEUE_FULL' ||
+          error.code === 'VIDEO_ALREADY_RENDERING'
+        ) {
+          await ctx
+            .reply(this.botService.getVideoBusyMessage())
+            .catch(() => {});
+        } else if (error.code === 'VIDEO_COOLDOWN') {
+          await ctx
+            .reply(
+              this.botService.getVideoCooldownMessage(
+                this.parseCooldownSeconds(error),
+              ),
+            )
+            .catch(() => {});
+        } else {
+          await ctx
+            .reply(this.botService.getVideoFailedMessage())
+            .catch(() => {});
+        }
+        this.logger.warn(
+          `Video render failed for user ${ctx.from.id} platform ${request.platform} code ${error.code}: ${error.message}`,
+        );
+        return;
+      }
+
+      this.logger.warn(
+        `Video render failed for user ${ctx.from.id} platform ${request.platform}: ${error instanceof Error ? error.message : 'unknown error'}`,
+      );
+      await ctx.reply(this.botService.getVideoFailedMessage()).catch(() => {});
+    } finally {
+      clearInterval(heartbeat);
+      if (status) {
+        await ctx.telegram
+          .deleteMessage(status.chat.id, status.message_id)
+          .catch(() => {});
+      }
+      await result?.cleanup().catch(() => {});
+    }
+  }
+
+  private async answerVideoRenderError(
+    ctx: Context,
+    error: unknown,
+    platform: VideoPlatform,
+  ): Promise<void> {
+    if (error instanceof VideoExportError) {
+      if (
+        error.code === 'VIDEO_QUEUE_FULL' ||
+        error.code === 'VIDEO_ALREADY_RENDERING'
+      ) {
+        await ctx
+          .answerCbQuery(this.botService.getVideoBusyMessage(), {
+            show_alert: true,
+          } as never)
+          .catch(() => {});
+        return;
+      }
+      if (error.code === 'VIDEO_COOLDOWN') {
+        await ctx
+          .answerCbQuery(
+            this.botService.getVideoCooldownMessage(
+              this.parseCooldownSeconds(error),
+            ),
+            { show_alert: true } as never,
+          )
+          .catch(() => {});
+        return;
+      }
+      if (
+        error.code === 'VIDEO_UNAVAILABLE' ||
+        error.code === 'VIDEO_DISABLED'
+      ) {
+        await ctx
+          .answerCbQuery(this.botService.getVideoUnavailableMessage(), {
+            show_alert: true,
+          } as never)
+          .catch(() => {});
+        return;
+      }
+      if (error.code === 'VIDEO_EXPIRED') {
+        await ctx
+          .answerCbQuery(this.botService.getVideoExpiredMessage(), {
+            show_alert: true,
+          } as never)
+          .catch(() => {});
+        await ctx
+          .reply(this.botService.getVideoExpiredMessage())
+          .catch(() => {});
+        return;
+      }
+      if (error.code === 'VIDEO_TOO_LARGE') {
+        await ctx
+          .answerCbQuery(this.botService.getFileTooLargeMessage(platform), {
+            show_alert: true,
+          } as never)
+          .catch(() => {});
+        await ctx
+          .reply(this.botService.getFileTooLargeMessage(platform))
+          .catch(() => {});
+        return;
+      }
+      this.logger.warn(
+        `Video render rejected platform ${platform} code ${error.code}: ${error.message}`,
+      );
+    } else {
+      this.logger.warn(
+        `Video render rejected platform ${platform}: ${error instanceof Error ? error.message : 'unknown error'}`,
+      );
+    }
+    await ctx
+      .answerCbQuery(this.botService.getVideoFailedMessage(), {
+        show_alert: true,
+      } as never)
+      .catch(() => {});
+  }
+
+  private parseCooldownSeconds(error: VideoExportError): number {
+    const fromProp =
+      (error as unknown as { retryAfterSec?: unknown }).retryAfterSec ??
+      (error as unknown as { retryAfterSeconds?: unknown }).retryAfterSeconds;
+    if (typeof fromProp === 'number' && Number.isFinite(fromProp)) {
+      return Math.max(1, Math.ceil(fromProp));
+    }
+    const match = /(\d+)\s*s(?:ec(?:ond)?s?)?/i.exec(error.message ?? '');
+    if (match?.[1]) {
+      const parsed = Number(match[1]);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return Math.ceil(parsed);
+      }
+    }
+    return 30;
+  }
+
+  private async refreshSlideshowRequest(
+    request: VideoRequest,
+  ): Promise<VideoRequest> {
+    let fresh: MediaInfo;
+    try {
+      fresh = await this.downloadService.refreshMediaInfo(request.url);
+    } catch (error) {
+      this.logger.warn(
+        `Slideshow refresh failed for ${request.platform}, using stored URLs: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      );
+      return request;
+    }
+    const minImages = request.platform === 'tiktok' && fresh.music ? 1 : 2;
+    if (!fresh.images || fresh.images.length < minImages) {
+      this.logger.warn(
+        `Slideshow refresh returned ${fresh.images?.length ?? 0} images, using stored URLs`,
+      );
+      return request;
+    }
+    this.logger.log(
+      `Slideshow URLs refreshed for ${request.platform}: ${fresh.images.length} images audio=${fresh.music ? 'yes' : 'no'}`,
+    );
+    return {
+      ...request,
+      images: fresh.images,
+      music: fresh.music || null,
+      musicDurationSec: fresh.musicDurationSec ?? null,
+      musicTitle: fresh.musicTitle ?? null,
+    };
   }
 
   private createAudioCallback(music: string, title: string): string {
