@@ -62,6 +62,8 @@ function makeUpdate() {
     reportService as never,
     reportNotifier as never,
     {} as never,
+    { isAvailable: () => false } as never,
+    { get: () => null, create: () => null, delete: () => {} } as never,
   );
 
   return {
