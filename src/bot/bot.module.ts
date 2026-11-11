@@ -8,12 +8,14 @@ import { BotLauncherService } from './bot-launcher.service';
 import { BroadcastService } from './broadcast.service';
 import { DownloadModule } from '../download/download.module';
 import { UserModule } from '../user/user.module';
+import { ReportModule } from '../report/report.module';
 
 @Module({
   imports: [
     ConfigModule,
     DownloadModule,
     UserModule,
+    ReportModule,
     TelegrafModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
