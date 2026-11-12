@@ -5,23 +5,14 @@ import {
   buildTikTokStillArgs,
   dotsRowLayout,
 } from './slideshow.args';
-import type { DotsRow } from './slideshow.args';
 
 describe('buildTikTokArgs', () => {
   const images = Array.from(
     { length: 4 },
     (_, index) => `/tmp/job/norm-${String(index).padStart(3, '0')}.jpg`,
   );
-  const dotsRows: DotsRow[] = [0, 1, 2, 3].map((slide) => ({
-    file: `/tmp/job/dots-${String(slide).padStart(3, '0')}.png`,
-    x: 322,
-    y: 1170,
-    startSec: slide * 2,
-    endSec: (slide + 1) * 2,
-  }));
   const base = {
     imageFiles: images,
-    dotsRows,
     outputFile: '/tmp/job/out.mp4',
     totalSec: 8,
     perSlideSec: 2,
@@ -46,7 +37,8 @@ describe('buildTikTokArgs', () => {
     );
     expect(filter).toContain('offset=6.000[vout]');
     expect(args).toContain('4:a:0');
-    expect(filter).toContain('[vfinal]');
+    expect(filter).toContain('[vout]');
+    expect(filter).not.toContain('overlay');
     expect(args).toContain(
       'afade=t=in:st=0:d=0.25,afade=t=out:st=7.500:d=0.5',
     );
@@ -54,21 +46,14 @@ describe('buildTikTokArgs', () => {
     expect(args).toContain('+faststart');
     expect(args[args.length - 1]).toBe('/tmp/job/out.mp4');
     expect(args).not.toContain('-an');
-    expect(args.filter((a) => a === '-i')).toHaveLength(9);
+    expect(args.filter((a) => a === '-i')).toHaveLength(5);
   });
 
-  it('overlays one dot strip per slide window', () => {
+  it('has no overlay inputs since dots are baked into frames', () => {
     const args = buildTikTokArgs({ ...base, musicFile: null });
     const filter = args[args.indexOf('-filter_complex') + 1];
-    expect(filter).toContain(
-      '[vout][d0]overlay=322:1170:' +
-        "enable='between(t,0.000,2.000)'[ov0]",
-    );
-    expect(filter).toContain(
-      '[ov2][d3]overlay=322:1170:' +
-        "enable='between(t,6.000,8.000)'[vfinal]",
-    );
-    expect(filter).toContain('[5:v]format=rgba');
+    expect(filter).not.toContain('overlay');
+    expect(filter).toContain('[vout]');
     expect(args).toContain('-an');
     expect(args).not.toContain('-stream_loop');
   });

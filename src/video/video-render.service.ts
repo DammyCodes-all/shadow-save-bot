@@ -262,12 +262,10 @@ export class VideoRenderService implements OnModuleInit, OnModuleDestroy {
                 config.renderTimeoutMs,
               );
             } else {
-              const dotsRows = await this.normalizer.buildDotsRows(
-                normalized.length,
-                timing.perSlideSec,
+              await this.normalizer.bakeDotsIntoImages(
+                normalized,
                 rung.width,
                 rung.height,
-                jobDir,
               );
               this.logger.log(
                 `job ${jobId} tiktok images=${normalized.length} perSlide=${timing.perSlideSec}s transition=${timing.transitionSec}s total=${timing.totalSec}s audio=${musicFile ? 'yes' : 'no'} preset=${rung.preset} ${rung.width}x${rung.height}`,
@@ -275,7 +273,6 @@ export class VideoRenderService implements OnModuleInit, OnModuleDestroy {
               await this.ffmpeg.run(
                 buildTikTokArgs({
                   imageFiles: normalized,
-                  dotsRows,
                   outputFile,
                   musicFile,
                   totalSec: timing.totalSec,

@@ -1,8 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { promises as fs } from 'fs';
 import { join } from 'path';
 import sharp from 'sharp';
 import { dotsRowLayout } from './slideshow.args';
-import type { DotsRow } from './slideshow.args';
 import { VideoExportError } from './video.types';
 
 const BACKGROUND = '#0B0B0F';
@@ -70,22 +70,19 @@ export class ImageNormalizer {
   }
 
   /**
-   * Builds one small overlay strip per slide showing the TikTok progress
-   * dots for that moment: fixed-size circles, truncated to a window that
-   * follows the current slide, with the current dot bright and the rest dim.
-   * Strips are tiny (row-sized, mostly transparent) so decoding one per
-   * frame stays cheap.
+   * Bakes the TikTok progress-dot row directly into each normalized image
+   * (bright dot on the current slide, dim on the rest, sliding window when
+   * truncated). Baking avoids overlay inputs in ffmpeg entirely — looped
+   * overlay streams with framesync cost hundreds of MB of peak RAM.
    */
-  async buildDotsRows(
-    imageCount: number,
-    perSlideSec: number,
+  async bakeDotsIntoImages(
+    files: string[],
     width: number,
     height: number,
-    dir: string,
-  ): Promise<DotsRow[]> {
-    const rows: DotsRow[] = [];
-    for (let slide = 0; slide < imageCount; slide += 1) {
-      const layout = dotsRowLayout(imageCount, slide, width, height);
+  ): Promise<void> {
+    const total = files.length;
+    for (let slide = 0; slide < files.length; slide += 1) {
+      const layout = dotsRowLayout(total, slide, width, height);
       if (!layout) {
         throw new VideoExportError(
           'VIDEO_RENDER_FAILED',
@@ -95,33 +92,32 @@ export class ImageNormalizer {
       const radius = layout.diameter / 2;
       const activeOffset = slide - layout.startIndex;
       const circles = layout.xs
-        .map((dx, i) => {
-          const opacity = i === activeOffset ? 1 : 0.35;
-          return (
+        .map(
+          (dx, i) =>
             `<circle cx="${dx + radius}" cy="${radius}" r="${radius}" ` +
-            `fill="white" fill-opacity="${opacity}"/>`
-          );
-        })
+            `fill="white" fill-opacity="${i === activeOffset ? 1 : 0.35}"/>`,
+        )
         .join('');
       const svg =
         `<svg xmlns="http://www.w3.org/2000/svg" width="${layout.stripWidth}" ` +
         `height="${layout.stripHeight}">${circles}</svg>`;
-      const file = join(dir, `dots-${String(slide).padStart(3, '0')}.png`);
+      const tmp = `${files[slide]}.dots.jpg`;
       try {
-        await sharp(Buffer.from(svg)).png().toFile(file);
+        await sharp(files[slide])
+          .composite([
+            { input: Buffer.from(svg), left: layout.x, top: layout.y },
+          ])
+          .jpeg({ quality: JPEG_QUALITY })
+          .toFile(tmp);
+        await fs.rename(tmp, files[slide]);
       } catch (err) {
-        throw new VideoExportError('VIDEO_RENDER_FAILED', 'Could not render progress dots.', {
-          cause: err,
-        });
+        await fs.rm(tmp, { force: true });
+        throw new VideoExportError(
+          'VIDEO_RENDER_FAILED',
+          'Could not render progress dots.',
+          { cause: err },
+        );
       }
-      rows.push({
-        file,
-        x: layout.x,
-        y: layout.y,
-        startSec: slide * perSlideSec,
-        endSec: (slide + 1) * perSlideSec,
-      });
     }
-    return rows;
   }
 }

@@ -2,7 +2,6 @@ import { VideoExportError } from './video.types';
 
 export type TikTokArgsOptions = {
   imageFiles: string[];
-  dotsRows: DotsRow[];
   outputFile: string;
   musicFile?: string | null;
   totalSec: number;
@@ -68,16 +67,6 @@ export const DOTS_DIAMETER = 14;
 export const DOTS_SPACING = 24;
 export const DOTS_Y_OFFSET = 110;
 const DOTS_MAX_WIDTH_RATIO = 0.9;
-
-export type DotsRow = {
-  /** Overlay strip image for one slide's dot state. */
-  file: string;
-  /** Top-left position of the strip on the video frame. */
-  x: number;
-  y: number;
-  startSec: number;
-  endSec: number;
-};
 
 export type DotsRowLayout = {
   diameter: number;
@@ -257,44 +246,16 @@ export function buildTikTokArgs(opts: TikTokArgsOptions): string[] {
     lastLabel = outputLabel;
     offset += opts.perSlideSec;
   }
-  // Progress-dot strips: one tiny overlay per slide, each visible only
-  // during its own time window. Strips (not full-frame images) keep the
-  // per-frame decode cost negligible.
-  let videoLabel = 'vout';
-  opts.dotsRows.forEach((row, rowIndex) => {
-    const dotsInputIndex =
-      audioInputIndex + (hasAudio ? 1 : 0) + rowIndex;
-    filters.push(
-      `[${dotsInputIndex}:v]format=rgba,setpts=PTS-STARTPTS,fps=${opts.fps}[d${rowIndex}]`,
-    );
-    const overlayLabel =
-      rowIndex === opts.dotsRows.length - 1 ? 'vfinal' : `ov${rowIndex}`;
-    filters.push(
-      `[${videoLabel}][d${rowIndex}]overlay=${row.x}:${row.y}:` +
-        `enable='between(t,${row.startSec.toFixed(3)},${row.endSec.toFixed(3)})'` +
-        `[${overlayLabel}]`,
-    );
-    videoLabel = overlayLabel;
-  });
-  opts.dotsRows.forEach((row) => {
-    args.push(
-      '-loop',
-      '1',
-      '-framerate',
-      String(opts.fps),
-      '-t',
-      opts.totalSec.toFixed(3),
-      '-i',
-      row.file,
-    );
-  });
+  // Dots are baked into the frames by the normalizer, so the filter graph
+  // stays a plain xfade chain with no overlay inputs (looped overlay
+  // streams cost hundreds of MB of peak RAM via framesync).
   args.push('-filter_complex_threads', '1');
   args.push('-filter_complex', filters.join(';'));
   args.push(...videoCodecArgs(opts.preset, opts.crf, opts.threads));
   if (hasAudio) {
-    args.push(...audioArgs(opts.totalSec, audioInputIndex, `[${videoLabel}]`));
+    args.push(...audioArgs(opts.totalSec, audioInputIndex, '[vout]'));
   } else {
-    args.push('-map', `[${videoLabel}]`, '-an');
+    args.push('-map', '[vout]', '-an');
   }
   args.push(
     '-t',
