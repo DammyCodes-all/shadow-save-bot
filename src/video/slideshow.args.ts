@@ -394,6 +394,102 @@ export function buildInstagramArgs(opts: InstagramArgsOptions): string[] {
   return args;
 }
 
+export type MuxAudioArgsOptions = {
+  videoFile: string;
+  musicFile: string;
+  outputFile: string;
+  totalSec: number;
+};
+
+/**
+ * Joins per-segment MP4s (identical codec/params) with a stream copy — no
+ * re-encode, so this pass is cheap even on throttled boxes.
+ */
+export function buildJoinArgs(
+  listFile: string,
+  outputFile: string,
+): string[] {
+  return [
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-nostdin',
+    '-f',
+    'concat',
+    '-safe',
+    '0',
+    '-i',
+    listFile,
+    '-map',
+    '0:v:0',
+    '-c:v',
+    'copy',
+    '-map_metadata',
+    '-1',
+    '-movflags',
+    '+faststart',
+    outputFile,
+  ];
+}
+
+/**
+ * Muxes looped audio over a silent joined video with the standard fades.
+ * Video is stream-copied; only the audio is encoded.
+ */
+export function buildMuxAudioArgs(opts: MuxAudioArgsOptions): string[] {
+  assertPositiveDuration(opts.totalSec);
+  const args: string[] = [
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-nostdin',
+    '-i',
+    opts.videoFile,
+    '-stream_loop',
+    '-1',
+    '-i',
+    opts.musicFile,
+    '-c:v',
+    'copy',
+  ];
+  args.push(...audioArgs(opts.totalSec, 1, '0:v:0'));
+  args.push(
+    '-t',
+    opts.totalSec.toFixed(3),
+    '-map_metadata',
+    '-1',
+    '-movflags',
+    '+faststart',
+    opts.outputFile,
+  );
+  return args;
+}
+
+/**
+ * Splits N slides into balanced chunks of at most maxSize, each with at
+ * least 2 slides (xfade needs pairs). A trailing single is folded back so
+ * no chunk is ever too small to render on its own.
+ */
+export function splitIntoSegments(total: number, maxSize: number): number[] {
+  const count = Math.floor(total);
+  const size = Math.max(2, Math.floor(maxSize));
+  if (!Number.isFinite(count) || count <= size) {
+    return count > 0 ? [count] : [];
+  }
+  const chunks = Math.ceil(count / size);
+  const base = Math.floor(count / chunks);
+  if (base < 2) {
+    return [count];
+  }
+  const sizes: number[] = [];
+  for (let i = 0; i < chunks; i += 1) {
+    sizes.push(base + (i < count % chunks ? 1 : 0));
+  }
+  return sizes;
+}
+
 export function buildShrinkArgs(
   inputFile: string,
   outputFile: string,

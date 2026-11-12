@@ -1,9 +1,12 @@
 import {
   buildInstagramArgs,
+  buildJoinArgs,
+  buildMuxAudioArgs,
   buildShrinkArgs,
   buildTikTokArgs,
   buildTikTokStillArgs,
   dotsRowLayout,
+  splitIntoSegments,
 } from './slideshow.args';
 
 describe('buildTikTokArgs', () => {
@@ -100,6 +103,69 @@ describe('buildTikTokStillArgs', () => {
     const args = buildTikTokStillArgs({ ...base, musicFile: null });
     expect(args).toContain('-an');
     expect(args).not.toContain('-stream_loop');
+  });
+});
+
+describe('splitIntoSegments', () => {
+  it('keeps small slideshows whole', () => {
+    expect(splitIntoSegments(4, 4)).toEqual([4]);
+    expect(splitIntoSegments(1, 4)).toEqual([1]);
+  });
+
+  it('splits evenly and folds a trailing single back in', () => {
+    expect(splitIntoSegments(7, 4)).toEqual([4, 3]);
+    expect(splitIntoSegments(9, 4)).toEqual([3, 3, 3]);
+    expect(splitIntoSegments(5, 4)).toEqual([3, 2]);
+    expect(splitIntoSegments(35, 4)).toEqual([4, 4, 4, 4, 4, 4, 4, 4, 3]);
+  });
+
+  it('never emits chunks smaller than 2', () => {
+    expect(splitIntoSegments(3, 2)).toEqual([3]);
+    const cases: Array<[number, number]> = [
+      [11, 4],
+      [20, 6],
+      [35, 10],
+    ];
+    for (const [total, size] of cases) {
+      const sizes = splitIntoSegments(total, size);
+      expect(sizes.every((s) => s >= 2)).toBe(true);
+      expect(sizes.reduce((a, b) => a + b, 0)).toBe(total);
+      expect(sizes.every((s) => s <= size)).toBe(true);
+    }
+  });
+});
+
+describe('buildJoinArgs', () => {
+  it('concatenates segments with a stream copy', () => {
+    const args = buildJoinArgs('/tmp/job/join.txt', '/tmp/job/out.mp4');
+    expect(args).toContain('-f');
+    expect(args).toContain('concat');
+    expect(args).toContain('/tmp/job/join.txt');
+    expect(args).toContain('-c:v');
+    expect(args).toContain('copy');
+    expect(args).toContain('+faststart');
+    expect(args[args.length - 1]).toBe('/tmp/job/out.mp4');
+  });
+});
+
+describe('buildMuxAudioArgs', () => {
+  it('muxes looped audio over the joined video with fades', () => {
+    const args = buildMuxAudioArgs({
+      videoFile: '/tmp/job/joined.mp4',
+      musicFile: '/tmp/job/music.mp3',
+      outputFile: '/tmp/job/out.mp4',
+      totalSec: 21,
+    });
+    expect(args).toContain('/tmp/job/joined.mp4');
+    expect(args).toContain('-stream_loop');
+    expect(args).toContain('-c:v');
+    expect(args).toContain('copy');
+    expect(args).toContain('1:a:0');
+    expect(args).toContain(
+      'afade=t=in:st=0:d=0.25,afade=t=out:st=20.500:d=0.5',
+    );
+    expect(args).toContain('21.000');
+    expect(args[args.length - 1]).toBe('/tmp/job/out.mp4');
   });
 });
 

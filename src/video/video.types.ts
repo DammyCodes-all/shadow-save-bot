@@ -25,6 +25,7 @@ export type VideoConfig = {
   maxDurationSec: number;
   maxConcurrency: number;
   maxQueue: number;
+  segmentImages: number;
   userCooldownSec: number;
   tiktokMinSlideSec: number;
   tiktokMaxSlideSec: number;

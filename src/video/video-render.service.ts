@@ -7,14 +7,17 @@ import {
 import { randomBytes } from 'crypto';
 import { promises as fs } from 'fs';
 import { availableParallelism } from 'os';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import { FfmpegRunner } from './ffmpeg.runner';
 import { ImageNormalizer } from './image.normalizer';
 import {
   buildInstagramArgs,
+  buildJoinArgs,
+  buildMuxAudioArgs,
   buildShrinkArgs,
   buildTikTokArgs,
   buildTikTokStillArgs,
+  splitIntoSegments,
 } from './slideshow.args';
 import { SlideshowDownloader } from './slideshow.downloader';
 import {
@@ -26,6 +29,7 @@ import { VideoRenderQueue } from './video-render-queue';
 import type {
   RenderResult,
   SlideshowRenderRequest,
+  TikTokTiming,
   VideoPlatform,
 } from './video.types';
 import { VideoExportError } from './video.types';
@@ -35,6 +39,10 @@ const TIKTOK_MAX_IMAGES = 35;
 const INSTAGRAM_MAX_IMAGES = 20;
 const ORPHAN_MAX_AGE_MS = 2 * 60 * 60 * 1000;
 const SWEEP_INTERVAL_MS = 30 * 60 * 1000;
+
+function escapeConcatPath(path: string): string {
+  return path.replace(/'/g, `'\\''`);
+}
 
 export type RenderRung = {
   preset: string;
@@ -270,20 +278,13 @@ export class VideoRenderService implements OnModuleInit, OnModuleDestroy {
               this.logger.log(
                 `job ${jobId} tiktok images=${normalized.length} perSlide=${timing.perSlideSec}s transition=${timing.transitionSec}s total=${timing.totalSec}s audio=${musicFile ? 'yes' : 'no'} preset=${rung.preset} ${rung.width}x${rung.height}`,
               );
-              await this.ffmpeg.run(
-                buildTikTokArgs({
-                  imageFiles: normalized,
-                  outputFile,
-                  musicFile,
-                  totalSec: timing.totalSec,
-                  perSlideSec: timing.perSlideSec,
-                  transitionSec: timing.transitionSec,
-                  fps: config.fps,
-                  preset: rung.preset,
-                  crf: config.crf,
-                  threads: rung.threads,
-                }),
-                config.renderTimeoutMs,
+              await this.renderTikTokChain(
+                jobId,
+                normalized,
+                timing,
+                rung,
+                musicFile,
+                outputFile,
               );
             }
           } else {
@@ -395,6 +396,96 @@ export class VideoRenderService implements OnModuleInit, OnModuleDestroy {
         },
       );
     }
+  }
+
+  /**
+   * Renders a TikTok slideshow, splitting long ones into short segments.
+   * Each segment runs its own small xfade chain (bounded peak RAM no matter
+   * how many photos), then segments are concat-joined and the audio is
+   * muxed over the whole result. Joints between segments are hard cuts —
+   * swipes happen inside segments.
+   */
+  private async renderTikTokChain(
+    jobId: string,
+    normalized: string[],
+    timing: TikTokTiming,
+    rung: RenderRung,
+    musicFile: string | null,
+    outputFile: string,
+  ): Promise<void> {
+    const config = this.videoConfig.config;
+    const chunks = splitIntoSegments(normalized.length, config.segmentImages);
+    if (chunks.length <= 1) {
+      await this.ffmpeg.run(
+        buildTikTokArgs({
+          imageFiles: normalized,
+          outputFile,
+          musicFile,
+          totalSec: timing.totalSec,
+          perSlideSec: timing.perSlideSec,
+          transitionSec: timing.transitionSec,
+          fps: config.fps,
+          preset: rung.preset,
+          crf: config.crf,
+          threads: rung.threads,
+        }),
+        config.renderTimeoutMs,
+      );
+      return;
+    }
+    this.logger.log(
+      `job ${jobId} tiktok segmented into ${chunks.length} parts (${chunks.join('+')})`,
+    );
+    const segDir = dirname(outputFile);
+    const segFiles: string[] = [];
+    let offset = 0;
+    for (let i = 0; i < chunks.length; i += 1) {
+      const chunk = normalized.slice(offset, offset + chunks[i]);
+      offset += chunks[i];
+      const segFile = join(segDir, `seg-${i}.mp4`);
+      await this.ffmpeg.run(
+        buildTikTokArgs({
+          imageFiles: chunk,
+          outputFile: segFile,
+          musicFile: null,
+          totalSec: timing.perSlideSec * chunk.length,
+          perSlideSec: timing.perSlideSec,
+          transitionSec: timing.transitionSec,
+          fps: config.fps,
+          preset: rung.preset,
+          crf: config.crf,
+          threads: rung.threads,
+        }),
+        config.renderTimeoutMs,
+      );
+      segFiles.push(segFile);
+    }
+    const listFile = join(segDir, 'join.txt');
+    await fs.writeFile(
+      listFile,
+      segFiles.map((f) => `file '${escapeConcatPath(f)}'`).join('\n') + '\n',
+    );
+    if (!musicFile) {
+      await this.ffmpeg.run(
+        buildJoinArgs(listFile, outputFile),
+        config.renderTimeoutMs,
+      );
+      return;
+    }
+    const joinedFile = join(segDir, 'joined.mp4');
+    await this.ffmpeg.run(
+      buildJoinArgs(listFile, joinedFile),
+      config.renderTimeoutMs,
+    );
+    await this.ffmpeg.run(
+      buildMuxAudioArgs({
+        videoFile: joinedFile,
+        musicFile,
+        outputFile,
+        totalSec: timing.totalSec,
+      }),
+      config.renderTimeoutMs,
+    );
   }
 
   async onModuleInit(): Promise<void> {

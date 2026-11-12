@@ -321,12 +321,13 @@ Create a local `.env` file or set environment variables before starting the app.
 | `FFMPEG_PATH`                    | bundled `ffmpeg-static` | Optional ffmpeg binary override; set this to prefer a system binary |
 | `VIDEO_WIDTH`                    | `720`         | Output width                             |
 | `VIDEO_HEIGHT`                   | `1280`        | Output height                            |
-| `VIDEO_FPS`                      | `30`          | Output frame rate                        |
+| `VIDEO_FPS`                      | `24`          | Output frame rate (photo slideshows need no more) |
 | `VIDEO_CRF`                      | `26`          | x264 quality                             |
 | `VIDEO_PRESET`                   | `superfast`   | x264 preset (fast + low-RAM default)     |
 | `VIDEO_MAX_DURATION_SEC`         | `60`          | Hard duration cap                        |
 | `VIDEO_MAX_CONCURRENCY`          | CPU-based     | Simultaneous renders (1 vCPU → 1, 4+ vCPU → 2) |
 | `VIDEO_MAX_QUEUE`                | `20`          | Pending renders                          |
+| `VIDEO_SEGMENT_IMAGES`           | `4`           | Max photos per render chunk (long slideshows split, render, join) |
 | `VIDEO_TIKTOK_MIN_SLIDE_SEC`     | `1.5`         | TikTok minimum per image                 |
 | `VIDEO_TIKTOK_MAX_SLIDE_SEC`     | `3.0`         | TikTok maximum per image                 |
 | `VIDEO_IG_SECONDS_PER_SLIDE`     | `2.0`         | Instagram time per slide                 |
@@ -405,7 +406,7 @@ Telegram media groups support a maximum of 10 items per group. For that reason, 
 
 After the image batches, the bot sends a control message with a "🎬 Make video" button (TikTok: "Want this slideshow as a video with the original sound?"; Instagram: "Want this carousel as an auto-scroll video?"). The button stays valid for 24 hours. Tapping it re-resolves the original link into fresh image/audio URLs (stored CDN links expire quickly), then queues the render, downloads and normalizes the images with sharp, computes timing, runs ffmpeg, and uploads the MP4 with `supports_streaming: true`. Temp job directories are deleted after upload, even on failure.
 
-- TikTok: `xfade` swipe chain (new photo slides in from the right with a hard edge, no blending — even per-slide spread across the sound duration, clamped to 1.5–3.0 s, 60 s cap, audio looped/trimmed with fade, or `-an` when silent). Progress dots are baked into each frame by sharp (fixed 14px circles, sliding-window truncation, current dot bright). Single stills use a plain loop with no dots or transitions.
+- TikTok: `xfade` swipe chain (new photo slides in from the right with a hard edge, no blending — even per-slide spread across the sound duration, clamped to 1.5–3.0 s, 60 s cap, audio looped/trimmed with fade, or `-an` when silent). Long slideshows are split into ≤4-photo segments rendered separately then joined (bounded RAM on small servers; hard cut at joints). Progress dots are baked into each frame by sharp (fixed 14px circles, sliding-window truncation, current dot bright). Single stills use a plain loop with no dots or transitions.
 - Instagram: an `xfade` `slideup` chain (2 s per slide plus a 0.5 s start hold, short transitions between images), silent by default. This decodes one normalized image per frame instead of repeatedly decoding a tall strip, which keeps renders fast on small servers.
 
 ## Error handling
