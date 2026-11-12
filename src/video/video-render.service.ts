@@ -11,9 +11,8 @@ import { dirname, join } from 'path';
 import { FfmpegRunner } from './ffmpeg.runner';
 import { ImageNormalizer } from './image.normalizer';
 import {
+  buildAssemblyArgs,
   buildInstagramArgs,
-  buildJoinArgs,
-  buildMuxAudioArgs,
   buildShrinkArgs,
   buildTikTokArgs,
   buildTikTokStillArgs,
@@ -39,10 +38,6 @@ const TIKTOK_MAX_IMAGES = 35;
 const INSTAGRAM_MAX_IMAGES = 20;
 const ORPHAN_MAX_AGE_MS = 2 * 60 * 60 * 1000;
 const SWEEP_INTERVAL_MS = 30 * 60 * 1000;
-
-function escapeConcatPath(path: string): string {
-  return path.replace(/'/g, `'\\''`);
-}
 
 export type RenderRung = {
   preset: string;
@@ -445,15 +440,13 @@ export class VideoRenderService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     this.logger.log(
-      `job ${jobId} tiktok segmented into ${chunks.length} parts (${chunks.join('+')})`,
+      `job ${jobId} tiktok segmented into ${chunks.length} parts (${chunks.map((c) => c.count).join('+')})`,
     );
     const segDir = dirname(outputFile);
     const segFiles: string[] = [];
-    let offset = 0;
     for (let i = 0; i < chunks.length; i += 1) {
-      const chunk = normalized.slice(offset, offset + chunks[i]);
-      const firstSlide = offset;
-      offset += chunks[i];
+      const { start: firstSlide, count } = chunks[i];
+      const chunk = normalized.slice(firstSlide, firstSlide + count);
       const segFile = join(segDir, `seg-${i}.mp4`);
       // Rows keep global slide indices (right dots, right highlight) but
       // their windows shift to the segment's local timeline (t=0 start).
@@ -486,29 +479,19 @@ export class VideoRenderService implements OnModuleInit, OnModuleDestroy {
       );
       segFiles.push(segFile);
     }
-    const listFile = join(segDir, 'join.txt');
-    await fs.writeFile(
-      listFile,
-      segFiles.map((f) => `file '${escapeConcatPath(f)}'`).join('\n') + '\n',
-    );
-    if (!musicFile) {
-      await this.ffmpeg.run(
-        buildJoinArgs(listFile, outputFile),
-        config.renderTimeoutMs,
-      );
-      return;
-    }
-    const joinedFile = join(segDir, 'joined.mp4');
+    // Segments overlap by one slide so every swipe renders inside a segment;
+    // the assembly trims each duplicated head and re-encodes the join.
     await this.ffmpeg.run(
-      buildJoinArgs(listFile, joinedFile),
-      config.renderTimeoutMs,
-    );
-    await this.ffmpeg.run(
-      buildMuxAudioArgs({
-        videoFile: joinedFile,
+      buildAssemblyArgs({
+        segmentFiles: segFiles,
+        trimHeadSec: timing.perSlideSec,
         musicFile,
         outputFile,
         totalSec: timing.totalSec,
+        fps: config.fps,
+        preset: rung.preset,
+        crf: config.crf,
+        threads: rung.threads,
       }),
       config.renderTimeoutMs,
     );

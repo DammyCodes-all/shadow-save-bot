@@ -443,64 +443,70 @@ export function buildInstagramArgs(opts: InstagramArgsOptions): string[] {
   return args;
 }
 
-export type MuxAudioArgsOptions = {
-  videoFile: string;
-  musicFile: string;
+export type AssemblyArgsOptions = {
+  segmentFiles: string[];
+  /** Seconds to trim off the head of every segment after the first. */
+  trimHeadSec: number;
+  musicFile?: string | null;
   outputFile: string;
   totalSec: number;
+  fps: number;
+  preset: string;
+  crf: number;
+  threads: number;
 };
 
 /**
- * Joins per-segment MP4s (identical codec/params) with a stream copy — no
- * re-encode, so this pass is cheap even on throttled boxes.
+ * Assembles overlapping segments into the finished video. Every segment
+ * after the first repeats the previous segment's last slide, so the swipe
+ * into it is rendered inside the segment; the duplicated head (one full
+ * slide hold) is trimmed here and the remainder is concatenated. Segments
+ * are re-encoded (trim is a filter), so this pass costs one light encode —
+ * still far cheaper than one giant xfade graph on a throttled box.
  */
-export function buildJoinArgs(listFile: string, outputFile: string): string[] {
-  return [
-    '-y',
-    '-hide_banner',
-    '-loglevel',
-    'error',
-    '-nostdin',
-    '-f',
-    'concat',
-    '-safe',
-    '0',
-    '-i',
-    listFile,
-    '-map',
-    '0:v:0',
-    '-c:v',
-    'copy',
-    '-map_metadata',
-    '-1',
-    '-movflags',
-    '+faststart',
-    outputFile,
-  ];
-}
-
-/**
- * Muxes looped audio over a silent joined video with the standard fades.
- * Video is stream-copied; only the audio is encoded.
- */
-export function buildMuxAudioArgs(opts: MuxAudioArgsOptions): string[] {
+export function buildAssemblyArgs(opts: AssemblyArgsOptions): string[] {
   assertPositiveDuration(opts.totalSec);
+  if (opts.segmentFiles.length < 2) {
+    throw new VideoExportError(
+      'VIDEO_RENDER_FAILED',
+      'Assembly needs at least 2 segments.',
+    );
+  }
+  const hasAudio = Boolean(opts.musicFile);
   const args: string[] = [
     '-y',
     '-hide_banner',
     '-loglevel',
     'error',
     '-nostdin',
-    '-i',
-    opts.videoFile,
-    '-stream_loop',
-    '-1',
-    '-i',
-    opts.musicFile,
-    '-c:v',
-    'copy',
   ];
-  args.push(...audioArgs(opts.totalSec, 1, '0:v:0'));
+  opts.segmentFiles.forEach((file) => {
+    args.push('-i', file);
+  });
+  if (hasAudio) {
+    args.push('-stream_loop', '-1', '-i', opts.musicFile as string);
+  }
+  const audioInputIndex = opts.segmentFiles.length;
+  const filters = opts.segmentFiles.map((_, index) => {
+    const head = index === 0 ? 0 : opts.trimHeadSec;
+    return (
+      `[${index}:v]trim=start=${head.toFixed(3)},setpts=PTS-STARTPTS,` +
+      `fps=${opts.fps}[s${index}]`
+    );
+  });
+  for (let index = 1; index < opts.segmentFiles.length; index += 1) {
+    const prev = index === 1 ? 's0' : `c${index - 2}`;
+    const out =
+      index === opts.segmentFiles.length - 1 ? 'vcat' : `c${index - 1}`;
+    filters.push(`[${prev}][s${index}]concat=n=2:v=1:a=0[${out}]`);
+  }
+  args.push('-filter_complex', filters.join(';'));
+  args.push(...videoCodecArgs(opts.preset, opts.crf, opts.threads));
+  if (hasAudio) {
+    args.push(...audioArgs(opts.totalSec, audioInputIndex, '[vcat]'));
+  } else {
+    args.push('-map', '[vcat]', '-an');
+  }
   args.push(
     '-t',
     opts.totalSec.toFixed(3),
@@ -514,26 +520,43 @@ export function buildMuxAudioArgs(opts: MuxAudioArgsOptions): string[] {
 }
 
 /**
- * Splits N slides into balanced chunks of at most maxSize, each with at
- * least 2 slides (xfade needs pairs). A trailing single is folded back so
- * no chunk is ever too small to render on its own.
+ * Splits N slides into overlapping chunks of at most maxSize images. Every
+ * chunk after the first repeats the previous chunk's last slide, so the
+ * swipe across the boundary renders inside a chunk and no joint ever needs
+ * a hard cut. Chunk image counts always stay >= 2 (xfade needs pairs).
  */
-export function splitIntoSegments(total: number, maxSize: number): number[] {
+export type SlideChunk = {
+  /** Global index of the first slide in the chunk. */
+  start: number;
+  /** Number of slides in the chunk (includes the shared boundary slide). */
+  count: number;
+};
+
+export function splitIntoSegments(
+  total: number,
+  maxSize: number,
+): SlideChunk[] {
   const count = Math.floor(total);
   const size = Math.max(2, Math.floor(maxSize));
-  if (!Number.isFinite(count) || count <= size) {
-    return count > 0 ? [count] : [];
+  if (!Number.isFinite(count) || count <= 0) {
+    return [];
   }
-  const chunks = Math.ceil(count / size);
-  const base = Math.floor(count / chunks);
-  if (base < 2) {
-    return [count];
+  if (count <= size) {
+    return [{ start: 0, count }];
   }
-  const sizes: number[] = [];
-  for (let i = 0; i < chunks; i += 1) {
-    sizes.push(base + (i < count % chunks ? 1 : 0));
+  const step = size - 1;
+  const chunks: SlideChunk[] = [];
+  let start = 0;
+  while (start < count) {
+    const rest = count - start;
+    if (rest <= size) {
+      chunks.push({ start, count: rest });
+      break;
+    }
+    chunks.push({ start, count: size });
+    start += step;
   }
-  return sizes;
+  return chunks;
 }
 
 export function buildShrinkArgs(

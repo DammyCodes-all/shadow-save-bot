@@ -1,7 +1,6 @@
 import {
+  buildAssemblyArgs,
   buildInstagramArgs,
-  buildJoinArgs,
-  buildMuxAudioArgs,
   buildShrinkArgs,
   buildTikTokArgs,
   buildTikTokStillArgs,
@@ -55,9 +54,7 @@ describe('buildTikTokArgs', () => {
     expect(args).toContain('4:a:0');
     expect(filter).toContain('[vfinal]');
     expect(filter).not.toContain('drawbox');
-    expect(args).toContain(
-      'afade=t=in:st=0:d=0.25,afade=t=out:st=7.500:d=0.5',
-    );
+    expect(args).toContain('afade=t=in:st=0:d=0.25,afade=t=out:st=7.500:d=0.5');
     expect(args).toContain('8.000');
     expect(args).toContain('+faststart');
     expect(args[args.length - 1]).toBe('/tmp/job/out.mp4');
@@ -155,64 +152,89 @@ describe('buildTikTokStillArgs', () => {
 
 describe('splitIntoSegments', () => {
   it('keeps small slideshows whole', () => {
-    expect(splitIntoSegments(4, 4)).toEqual([4]);
-    expect(splitIntoSegments(1, 4)).toEqual([1]);
+    expect(splitIntoSegments(4, 4)).toEqual([{ start: 0, count: 4 }]);
+    expect(splitIntoSegments(2, 4)).toEqual([{ start: 0, count: 2 }]);
   });
 
-  it('splits evenly and folds a trailing single back in', () => {
-    expect(splitIntoSegments(7, 4)).toEqual([4, 3]);
-    expect(splitIntoSegments(9, 4)).toEqual([3, 3, 3]);
-    expect(splitIntoSegments(5, 4)).toEqual([3, 2]);
-    expect(splitIntoSegments(35, 4)).toEqual([4, 4, 4, 4, 4, 4, 4, 4, 3]);
+  it('overlaps chunks by one slide so joints swipe instead of cut', () => {
+    expect(splitIntoSegments(7, 4)).toEqual([
+      { start: 0, count: 4 },
+      { start: 3, count: 4 },
+    ]);
+    expect(splitIntoSegments(9, 4)).toEqual([
+      { start: 0, count: 4 },
+      { start: 3, count: 4 },
+      { start: 6, count: 3 },
+    ]);
   });
 
-  it('never emits chunks smaller than 2', () => {
-    expect(splitIntoSegments(3, 2)).toEqual([3]);
+  it('never emits chunks smaller than 2 slides', () => {
     const cases: Array<[number, number]> = [
+      [3, 2],
+      [5, 4],
       [11, 4],
       [20, 6],
       [35, 10],
     ];
     for (const [total, size] of cases) {
-      const sizes = splitIntoSegments(total, size);
-      expect(sizes.every((s) => s >= 2)).toBe(true);
-      expect(sizes.reduce((a, b) => a + b, 0)).toBe(total);
-      expect(sizes.every((s) => s <= size)).toBe(true);
+      const chunks = splitIntoSegments(total, size);
+      expect(chunks.every((c) => c.count >= 2)).toBe(true);
+      expect(chunks.every((c) => c.count <= size)).toBe(true);
+      expect(chunks[0].start).toBe(0);
+      // Coverage is continuous with 1-slide overlaps, last ends at total.
+      const last = chunks[chunks.length - 1];
+      expect(last.start + last.count).toBe(total);
+      for (let i = 1; i < chunks.length; i += 1) {
+        expect(chunks[i].start).toBe(
+          chunks[i - 1].start + chunks[i - 1].count - 1,
+        );
+      }
     }
   });
 });
 
-describe('buildJoinArgs', () => {
-  it('concatenates segments with a stream copy', () => {
-    const args = buildJoinArgs('/tmp/job/join.txt', '/tmp/job/out.mp4');
-    expect(args).toContain('-f');
-    expect(args).toContain('concat');
-    expect(args).toContain('/tmp/job/join.txt');
-    expect(args).toContain('-c:v');
-    expect(args).toContain('copy');
-    expect(args).toContain('+faststart');
-    expect(args[args.length - 1]).toBe('/tmp/job/out.mp4');
-  });
-});
+describe('buildAssemblyArgs', () => {
+  const base = {
+    segmentFiles: ['/tmp/job/seg-0.mp4', '/tmp/job/seg-1.mp4'],
+    trimHeadSec: 3,
+    outputFile: '/tmp/job/out.mp4',
+    totalSec: 21,
+    fps: 24,
+    preset: 'superfast',
+    crf: 26,
+    threads: 2,
+  };
 
-describe('buildMuxAudioArgs', () => {
-  it('muxes looped audio over the joined video with fades', () => {
-    const args = buildMuxAudioArgs({
-      videoFile: '/tmp/job/joined.mp4',
+  it('trims overlapped heads and concatenates with audio', () => {
+    const args = buildAssemblyArgs({
+      ...base,
       musicFile: '/tmp/job/music.mp3',
-      outputFile: '/tmp/job/out.mp4',
-      totalSec: 21,
     });
-    expect(args).toContain('/tmp/job/joined.mp4');
+    const filter = args[args.indexOf('-filter_complex') + 1];
+    expect(filter).toContain(
+      '[0:v]trim=start=0.000,setpts=PTS-STARTPTS,fps=24[s0]',
+    );
+    expect(filter).toContain(
+      '[1:v]trim=start=3.000,setpts=PTS-STARTPTS,fps=24[s1]',
+    );
+    expect(filter).toContain('[s0][s1]concat=n=2:v=1:a=0[vcat]');
     expect(args).toContain('-stream_loop');
-    expect(args).toContain('-c:v');
-    expect(args).toContain('copy');
-    expect(args).toContain('1:a:0');
+    expect(args).toContain('2:a:0');
     expect(args).toContain(
       'afade=t=in:st=0:d=0.25,afade=t=out:st=20.500:d=0.5',
     );
     expect(args).toContain('21.000');
+    expect(args).toContain('+faststart');
     expect(args[args.length - 1]).toBe('/tmp/job/out.mp4');
+  });
+
+  it('assembles silently without audio', () => {
+    const args = buildAssemblyArgs({ ...base, musicFile: null });
+    expect(args).toContain('-an');
+    expect(args).not.toContain('-stream_loop');
+    // Re-encodes (trim is a filter), no stream copy.
+    expect(args).toContain('libx264');
+    expect(args).not.toContain('copy');
   });
 });
 
@@ -273,7 +295,9 @@ describe('buildInstagramArgs', () => {
     expect(filter).toContain(
       '[0:v]format=yuv420p,setsar=1,trim=duration=3.000,setpts=PTS-STARTPTS,fps=30[v0]',
     );
-    expect(filter).toContain('[v0][v1]xfade=transition=slideup:duration=0.500:offset=2.500[vx1]');
+    expect(filter).toContain(
+      '[v0][v1]xfade=transition=slideup:duration=0.500:offset=2.500[vx1]',
+    );
     expect(filter).toContain('offset=4.500');
     expect(filter).toContain('offset=18.500[vout]');
     expect(args).toContain('-filter_complex_threads');
