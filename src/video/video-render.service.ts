@@ -412,10 +412,21 @@ export class VideoRenderService implements OnModuleInit, OnModuleDestroy {
   ): Promise<void> {
     const config = this.videoConfig.config;
     const chunks = splitIntoSegments(normalized.length, config.segmentImages);
+    const dotsRows =
+      normalized.length > 1
+        ? await this.normalizer.buildDotsRows(
+            normalized.length,
+            timing.perSlideSec,
+            rung.width,
+            rung.height,
+            dirname(outputFile),
+          )
+        : [];
     if (chunks.length <= 1) {
       await this.ffmpeg.run(
         buildTikTokArgs({
           imageFiles: normalized,
+          dotsRows,
           outputFile,
           musicFile,
           totalSec: timing.totalSec,
@@ -444,14 +455,24 @@ export class VideoRenderService implements OnModuleInit, OnModuleDestroy {
       const firstSlide = offset;
       offset += chunks[i];
       const segFile = join(segDir, `seg-${i}.mp4`);
+      // Rows keep global slide indices (right dots, right highlight) but
+      // their windows shift to the segment's local timeline (t=0 start).
+      const segStartSec = firstSlide * timing.perSlideSec;
+      const segRows = dotsRows
+        .slice(firstSlide, firstSlide + chunk.length)
+        .map((row) => ({
+          ...row,
+          startSec: row.startSec - segStartSec,
+          endSec: row.endSec - segStartSec,
+        }));
       await this.ffmpeg.run(
         buildTikTokArgs({
           imageFiles: chunk,
+          dotsRows: segRows,
           outputFile: segFile,
           musicFile: null,
           totalSec: timing.perSlideSec * chunk.length,
           imageCount: normalized.length,
-          firstSlide,
           perSlideSec: timing.perSlideSec,
           transitionSec: timing.transitionSec,
           width: rung.width,

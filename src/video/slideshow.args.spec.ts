@@ -9,13 +9,23 @@ import {
   splitIntoSegments,
 } from './slideshow.args';
 
+import type { DotsRow } from './slideshow.args';
+
 describe('buildTikTokArgs', () => {
   const images = Array.from(
     { length: 4 },
     (_, index) => `/tmp/job/norm-${String(index).padStart(3, '0')}.jpg`,
   );
+  const dotsRows: DotsRow[] = [0, 1, 2, 3].map((slide) => ({
+    file: `/tmp/job/dots-${String(slide).padStart(3, '0')}.png`,
+    x: 317,
+    y: 1170,
+    startSec: slide * 2,
+    endSec: (slide + 1) * 2,
+  }));
   const base = {
     imageFiles: images,
+    dotsRows,
     outputFile: '/tmp/job/out.mp4',
     totalSec: 8,
     imageCount: 4,
@@ -43,8 +53,8 @@ describe('buildTikTokArgs', () => {
     );
     expect(filter).toContain('offset=6.000[vout]');
     expect(args).toContain('4:a:0');
-    expect(filter).toContain('[vd3_3]');
-    expect(filter).not.toContain('overlay');
+    expect(filter).toContain('[vfinal]');
+    expect(filter).not.toContain('drawbox');
     expect(args).toContain(
       'afade=t=in:st=0:d=0.25,afade=t=out:st=7.500:d=0.5',
     );
@@ -52,41 +62,50 @@ describe('buildTikTokArgs', () => {
     expect(args).toContain('+faststart');
     expect(args[args.length - 1]).toBe('/tmp/job/out.mp4');
     expect(args).not.toContain('-an');
-    expect(args.filter((a) => a === '-i')).toHaveLength(5);
+    expect(args.filter((a) => a === '-i')).toHaveLength(9);
   });
 
-  it('draws pinned dots that advance per slide', () => {
+  it('overlays pinned dot strips with offset windows', () => {
     const args = buildTikTokArgs({ ...base, musicFile: null });
     const filter = args[args.indexOf('-filter_complex') + 1];
-    // 4 slides, 4 dots each: dim row plus one highlight each.
-    expect(filter.match(/drawbox=/g)).toHaveLength(16);
-    expect(filter).toContain(
-      'drawbox=x=317:y=1170:w=14:h=14:color=white@0.35:t=fill',
-    );
-    expect(filter).toContain(
-      "drawbox=x=317:y=1170:w=14:h=14:color=white@1:t=fill:enable='between(t,0.000,2.000)'",
-    );
+    // 4 strip overlays, one per slide; strips carry their own windows.
+    expect(filter.match(/overlay=/g)).toHaveLength(4);
+    expect(filter).toContain('overlay=317:1170:eof_action=pass:');
+    expect(filter).toContain("enable='between(t,0.000,2.000)'");
     expect(filter).toContain("enable='between(t,6.000,8.000)'");
+    expect(filter).not.toContain('drawbox');
+    // Dots strip inputs are offset to their own windows, not looped fully.
+    expect(args.filter((a) => a === '-itsoffset')).toHaveLength(4);
+    expect(args).toContain('2.100');
+    // 4 images + 4 dot strips, no audio.
+    expect(args.filter((a) => a === '-i')).toHaveLength(8);
+    expect(args).toContain('-an');
+    expect(args).not.toContain('-stream_loop');
   });
 
-  it('offsets dot windows for later segments', () => {
+  it('uses global dot layouts with segment-local windows', () => {
+    const segRows: DotsRow[] = [4, 5, 6].map((slide) => ({
+      file: `/tmp/job/dots-${String(slide).padStart(3, '0')}.png`,
+      x: 281,
+      y: 1170,
+      startSec: (slide - 4) * 3,
+      endSec: (slide - 3) * 3,
+    }));
     const args = buildTikTokArgs({
       ...base,
-      imageFiles: images.slice(2),
+      imageFiles: images.slice(0, 3),
+      dotsRows: segRows,
       imageCount: 7,
-      firstSlide: 4,
       perSlideSec: 3,
       totalSec: 9,
-      width: 720,
-      height: 1280,
     });
     const filter = args[args.indexOf('-filter_complex') + 1];
-    // Second segment of a 7-slide show: global slides 4-6, local times 0-9s.
+    // Second segment of a 7-slide show: full 7-dot row strips, shifted to
+    // local 0-9s windows; the global highlight position rides along.
     expect(filter).toContain("enable='between(t,0.000,3.000)'");
-    expect(filter).toContain("enable='between(t,3.000,6.000)'");
-    expect(filter).not.toContain('9.000,12.000');
-    // Window of 7 still fits, centered like the full row would be.
-    expect(filter).toContain('drawbox=x=281:y=1170:w=14:h=14');
+    expect(filter).toContain("enable='between(t,6.000,9.000)'");
+    expect(filter).not.toContain('between(t,9.000,12.000)');
+    expect(filter).toContain('overlay=281:1170:eof_action=pass:');
   });
 
   it('rejects fewer than two images', () => {

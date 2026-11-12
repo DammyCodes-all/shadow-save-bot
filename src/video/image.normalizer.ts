@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { join } from 'path';
 import sharp from 'sharp';
+import { dotsRowLayout } from './slideshow.args';
+import type { DotsRow } from './slideshow.args';
 import { VideoExportError } from './video.types';
 
 const BACKGROUND = '#0B0B0F';
@@ -65,5 +67,60 @@ export class ImageNormalizer {
       );
     }
     return outputs;
+  }
+
+  /**
+   * Builds one small overlay strip per slide: fixed-size circles with the
+   * current slide bright (sliding window when truncated). Strips are tiny
+   * (row-sized, mostly transparent) and each is only decoded during its own
+   * time window — unlike full-duration looped overlays, nothing queues up.
+   */
+  async buildDotsRows(
+    imageCount: number,
+    perSlideSec: number,
+    width: number,
+    height: number,
+    dir: string,
+  ): Promise<DotsRow[]> {
+    const rows: DotsRow[] = [];
+    for (let slide = 0; slide < imageCount; slide += 1) {
+      const layout = dotsRowLayout(imageCount, slide, width, height);
+      if (!layout) {
+        throw new VideoExportError(
+          'VIDEO_RENDER_FAILED',
+          'Could not lay out progress dots.',
+        );
+      }
+      const radius = layout.diameter / 2;
+      const activeOffset = slide - layout.startIndex;
+      const circles = layout.xs
+        .map(
+          (dx, i) =>
+            `<circle cx="${dx + radius}" cy="${radius}" r="${radius}" ` +
+            `fill="white" fill-opacity="${i === activeOffset ? 1 : 0.35}"/>`,
+        )
+        .join('');
+      const svg =
+        `<svg xmlns="http://www.w3.org/2000/svg" width="${layout.stripWidth}" ` +
+        `height="${layout.stripHeight}">${circles}</svg>`;
+      const file = join(dir, `dots-${String(slide).padStart(3, '0')}.png`);
+      try {
+        await sharp(Buffer.from(svg)).png().toFile(file);
+      } catch (err) {
+        throw new VideoExportError(
+          'VIDEO_RENDER_FAILED',
+          'Could not render progress dots.',
+          { cause: err },
+        );
+      }
+      rows.push({
+        file,
+        x: layout.x,
+        y: layout.y,
+        startSec: slide * perSlideSec,
+        endSec: (slide + 1) * perSlideSec,
+      });
+    }
+    return rows;
   }
 }

@@ -6,8 +6,7 @@ export type TikTokArgsOptions = {
   musicFile?: string | null;
   totalSec: number;
   imageCount: number;
-  /** Global index of the first image (segments render local timelines). */
-  firstSlide?: number;
+  dotsRows: DotsRow[];
   perSlideSec: number;
   transitionSec: number;
   width: number;
@@ -72,6 +71,17 @@ export const DOTS_DIAMETER = 14;
 export const DOTS_SPACING = 24;
 export const DOTS_Y_OFFSET = 110;
 const DOTS_MAX_WIDTH_RATIO = 0.9;
+
+export type DotsRow = {
+  /** Overlay strip image for one slide's dot state. */
+  file: string;
+  /** Top-left position of the strip on the video frame. */
+  x: number;
+  y: number;
+  /** Global-window seconds (segments shift these to local time). */
+  startSec: number;
+  endSec: number;
+};
 
 export type DotsRowLayout = {
   diameter: number;
@@ -251,43 +261,42 @@ export function buildTikTokArgs(opts: TikTokArgsOptions): string[] {
     lastLabel = outputLabel;
     offset += opts.perSlideSec;
   }
-  // Progress dots are drawn here, AFTER the swipe chain, so they stay
-  // pinned while photos slide beneath them (baking them into the frames
-  // would make them ride along with the photo). drawbox needs no extra
-  // inputs — unlike overlay streams, which cost hundreds of MB of peak RAM
-  // via framesync, these are just cheap rectangle fills gated by time.
+  // Progress dots are overlaid AFTER the swipe chain so they stay pinned
+  // while photos slide beneath. Each strip input only carries frames for its
+  // own time window (offset with -itsoffset, cut with -t) and uses
+  // eof_action=pass outside it — unlike full-duration looped overlays, whose
+  // frames queue up unboundedly in framesync and cost hundreds of MB.
   // Sliding window (like TikTok): only the dots that fit are drawn, and the
   // window follows the current slide so the highlight is always visible.
   let dotLabel = 'vout';
-  const firstSlide = opts.firstSlide ?? 0;
-  const localCount = opts.imageFiles.length;
-  for (let s = 0; s < localCount; s += 1) {
-    const slide = firstSlide + s;
-    const layout = dotsRowLayout(
-      opts.imageCount,
-      slide,
-      opts.width,
-      opts.height,
+  const baseInputIndex = audioInputIndex + (hasAudio ? 1 : 0);
+  opts.dotsRows.forEach((row, rowIndex) => {
+    const windowSec = row.endSec - row.startSec + 0.1;
+    args.push(
+      '-itsoffset',
+      row.startSec.toFixed(3),
+      '-loop',
+      '1',
+      '-framerate',
+      String(opts.fps),
+      '-t',
+      windowSec.toFixed(3),
+      '-i',
+      row.file,
     );
-    if (!layout) {
-      continue;
-    }
-    // Local timeline: segment renders start at t=0 regardless of where the
-    // segment sits in the whole slideshow; the layout uses the global index.
-    const start = (s * opts.perSlideSec).toFixed(3);
-    const end = ((s + 1) * opts.perSlideSec).toFixed(3);
-    for (let i = 0; i < layout.xs.length; i += 1) {
-      const x = layout.x + layout.xs[i];
-      const bright = layout.startIndex + i === slide;
-      const outLabel = `vd${slide}_${i}`;
-      filters.push(
-        `[${dotLabel}]drawbox=x=${x}:y=${layout.y}:w=${layout.diameter}:h=${layout.diameter}:` +
-          `color=${bright ? 'white@1' : 'white@0.35'}:t=fill:` +
-          `enable='between(t,${start},${end})'[${outLabel}]`,
-      );
-      dotLabel = outLabel;
-    }
-  }
+    const dotsInputIndex = baseInputIndex + rowIndex;
+    filters.push(
+      `[${dotsInputIndex}:v]format=rgba,fps=${opts.fps}[d${rowIndex}]`,
+    );
+    const overlayLabel =
+      rowIndex === opts.dotsRows.length - 1 ? 'vfinal' : `ov${rowIndex}`;
+    filters.push(
+      `[${dotLabel}][d${rowIndex}]overlay=${row.x}:${row.y}:eof_action=pass:` +
+        `enable='between(t,${row.startSec.toFixed(3)},${row.endSec.toFixed(3)})'` +
+        `[${overlayLabel}]`,
+    );
+    dotLabel = overlayLabel;
+  });
   const finalLabel = dotLabel;
   args.push('-filter_complex_threads', '1');
   args.push('-filter_complex', filters.join(';'));
