@@ -214,15 +214,13 @@ export class VideoRenderService implements OnModuleInit, OnModuleDestroy {
         config.height,
         this.ffmpegThreads(),
       );
-      // Dots bake into TikTok slideshow frames during normalization (same
-      // Sharp pass, no extra decode/encode). Singles and Instagram skip them.
-      const bakeDots = request.platform === 'tiktok' && downloaded.length >= 2;
+      // Dots are drawn by ffmpeg after the swipe (pinned indicators); the
+      // normalizer just resizes here.
       let normalized = await this.normalizer.normalizeAll(
         downloaded,
         jobDir,
         ladder[0].width,
         ladder[0].height,
-        bakeDots,
       );
       const outputFile = join(jobDir, 'out.mp4');
       let width = ladder[0].width;
@@ -241,7 +239,6 @@ export class VideoRenderService implements OnModuleInit, OnModuleDestroy {
             jobDir,
             rung.width,
             rung.height,
-            bakeDots,
           );
           width = rung.width;
           height = rung.height;
@@ -422,8 +419,11 @@ export class VideoRenderService implements OnModuleInit, OnModuleDestroy {
           outputFile,
           musicFile,
           totalSec: timing.totalSec,
+          imageCount: normalized.length,
           perSlideSec: timing.perSlideSec,
           transitionSec: timing.transitionSec,
+          width: rung.width,
+          height: rung.height,
           fps: config.fps,
           preset: rung.preset,
           crf: config.crf,
@@ -441,6 +441,7 @@ export class VideoRenderService implements OnModuleInit, OnModuleDestroy {
     let offset = 0;
     for (let i = 0; i < chunks.length; i += 1) {
       const chunk = normalized.slice(offset, offset + chunks[i]);
+      const firstSlide = offset;
       offset += chunks[i];
       const segFile = join(segDir, `seg-${i}.mp4`);
       await this.ffmpeg.run(
@@ -449,8 +450,12 @@ export class VideoRenderService implements OnModuleInit, OnModuleDestroy {
           outputFile: segFile,
           musicFile: null,
           totalSec: timing.perSlideSec * chunk.length,
+          imageCount: normalized.length,
+          firstSlide,
           perSlideSec: timing.perSlideSec,
           transitionSec: timing.transitionSec,
+          width: rung.width,
+          height: rung.height,
           fps: config.fps,
           preset: rung.preset,
           crf: config.crf,

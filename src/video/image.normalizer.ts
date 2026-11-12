@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { join } from 'path';
 import sharp from 'sharp';
-import { dotsRowLayout } from './slideshow.args';
 import { VideoExportError } from './video.types';
 
 const BACKGROUND = '#0B0B0F';
@@ -21,7 +20,6 @@ export class ImageNormalizer {
     dir: string,
     width: number,
     height: number,
-    bakeDots = false,
   ): Promise<string[]> {
     const outputs: string[] = [];
     let outputIndex = 0;
@@ -31,7 +29,7 @@ export class ImageNormalizer {
         `norm-${String(outputIndex).padStart(3, '0')}.jpg`,
       );
       try {
-        let pipeline = sharp(input, {
+        await sharp(input, {
           failOn: 'none',
           limitInputPixels: 50_000_000,
           sequentialRead: true,
@@ -41,21 +39,7 @@ export class ImageNormalizer {
             fit: 'contain',
             background: BACKGROUND,
             withoutEnlargement: false,
-          });
-        // Dots go on in the same pipeline: a second decode+encode pass just
-        // to stamp dots would double sharp's work per image.
-        if (bakeDots) {
-          const overlay = this.dotsOverlay(
-            inputs.length,
-            outputIndex,
-            width,
-            height,
-          );
-          if (overlay) {
-            pipeline = pipeline.composite([overlay]);
-          }
-        }
-        await pipeline
+          })
           // Baseline JPEG on purpose: mozjpeg writes progressive scans, and
           // ffmpeg's mjpeg decoder rejects some tiny progressive files
           // (e.g. near-flat dark frames, common in real slideshows),
@@ -81,40 +65,5 @@ export class ImageNormalizer {
       );
     }
     return outputs;
-  }
-
-  /**
-   * Builds the dot-row overlay for one slide (bright dot on the current
-   * slide, dim on the rest, sliding window when truncated). Returns null
-   * when dots don't apply. Totals use the requested image count, so a
-   * skipped image can only shift the window in the rare failure case —
-   * never the dot positions of the images that did process.
-   */
-  private dotsOverlay(
-    total: number,
-    slide: number,
-    width: number,
-    height: number,
-  ): { input: Buffer; left: number; top: number } | null {
-    if (total < 2) {
-      return null;
-    }
-    const layout = dotsRowLayout(total, slide, width, height);
-    if (!layout) {
-      return null;
-    }
-    const radius = layout.diameter / 2;
-    const activeOffset = slide - layout.startIndex;
-    const circles = layout.xs
-      .map(
-        (dx, i) =>
-          `<circle cx="${dx + radius}" cy="${radius}" r="${radius}" ` +
-          `fill="white" fill-opacity="${i === activeOffset ? 1 : 0.35}"/>`,
-      )
-      .join('');
-    const svg =
-      `<svg xmlns="http://www.w3.org/2000/svg" width="${layout.stripWidth}" ` +
-      `height="${layout.stripHeight}">${circles}</svg>`;
-    return { input: Buffer.from(svg), left: layout.x, top: layout.y };
   }
 }

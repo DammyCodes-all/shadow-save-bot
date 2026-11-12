@@ -18,8 +18,11 @@ describe('buildTikTokArgs', () => {
     imageFiles: images,
     outputFile: '/tmp/job/out.mp4',
     totalSec: 8,
+    imageCount: 4,
     perSlideSec: 2,
     transitionSec: 0.4,
+    width: 720,
+    height: 1280,
     fps: 30,
     preset: 'veryfast',
     crf: 26,
@@ -40,7 +43,7 @@ describe('buildTikTokArgs', () => {
     );
     expect(filter).toContain('offset=6.000[vout]');
     expect(args).toContain('4:a:0');
-    expect(filter).toContain('[vout]');
+    expect(filter).toContain('[vd3_3]');
     expect(filter).not.toContain('overlay');
     expect(args).toContain(
       'afade=t=in:st=0:d=0.25,afade=t=out:st=7.500:d=0.5',
@@ -52,13 +55,38 @@ describe('buildTikTokArgs', () => {
     expect(args.filter((a) => a === '-i')).toHaveLength(5);
   });
 
-  it('has no overlay inputs since dots are baked into frames', () => {
+  it('draws pinned dots that advance per slide', () => {
     const args = buildTikTokArgs({ ...base, musicFile: null });
     const filter = args[args.indexOf('-filter_complex') + 1];
-    expect(filter).not.toContain('overlay');
-    expect(filter).toContain('[vout]');
-    expect(args).toContain('-an');
-    expect(args).not.toContain('-stream_loop');
+    // 4 slides, 4 dots each: dim row plus one highlight each.
+    expect(filter.match(/drawbox=/g)).toHaveLength(16);
+    expect(filter).toContain(
+      'drawbox=x=317:y=1170:w=14:h=14:color=white@0.35:t=fill',
+    );
+    expect(filter).toContain(
+      "drawbox=x=317:y=1170:w=14:h=14:color=white@1:t=fill:enable='between(t,0.000,2.000)'",
+    );
+    expect(filter).toContain("enable='between(t,6.000,8.000)'");
+  });
+
+  it('offsets dot windows for later segments', () => {
+    const args = buildTikTokArgs({
+      ...base,
+      imageFiles: images.slice(2),
+      imageCount: 7,
+      firstSlide: 4,
+      perSlideSec: 3,
+      totalSec: 9,
+      width: 720,
+      height: 1280,
+    });
+    const filter = args[args.indexOf('-filter_complex') + 1];
+    // Second segment of a 7-slide show: global slides 4-6, local times 0-9s.
+    expect(filter).toContain("enable='between(t,0.000,3.000)'");
+    expect(filter).toContain("enable='between(t,3.000,6.000)'");
+    expect(filter).not.toContain('9.000,12.000');
+    // Window of 7 still fits, centered like the full row would be.
+    expect(filter).toContain('drawbox=x=281:y=1170:w=14:h=14');
   });
 
   it('rejects fewer than two images', () => {

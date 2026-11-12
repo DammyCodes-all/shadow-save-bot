@@ -5,8 +5,13 @@ export type TikTokArgsOptions = {
   outputFile: string;
   musicFile?: string | null;
   totalSec: number;
+  imageCount: number;
+  /** Global index of the first image (segments render local timelines). */
+  firstSlide?: number;
   perSlideSec: number;
   transitionSec: number;
+  width: number;
+  height: number;
   fps: number;
   preset: string;
   crf: number;
@@ -246,16 +251,51 @@ export function buildTikTokArgs(opts: TikTokArgsOptions): string[] {
     lastLabel = outputLabel;
     offset += opts.perSlideSec;
   }
-  // Dots are baked into the frames by the normalizer, so the filter graph
-  // stays a plain xfade chain with no overlay inputs (looped overlay
-  // streams cost hundreds of MB of peak RAM via framesync).
+  // Progress dots are drawn here, AFTER the swipe chain, so they stay
+  // pinned while photos slide beneath them (baking them into the frames
+  // would make them ride along with the photo). drawbox needs no extra
+  // inputs — unlike overlay streams, which cost hundreds of MB of peak RAM
+  // via framesync, these are just cheap rectangle fills gated by time.
+  // Sliding window (like TikTok): only the dots that fit are drawn, and the
+  // window follows the current slide so the highlight is always visible.
+  let dotLabel = 'vout';
+  const firstSlide = opts.firstSlide ?? 0;
+  const localCount = opts.imageFiles.length;
+  for (let s = 0; s < localCount; s += 1) {
+    const slide = firstSlide + s;
+    const layout = dotsRowLayout(
+      opts.imageCount,
+      slide,
+      opts.width,
+      opts.height,
+    );
+    if (!layout) {
+      continue;
+    }
+    // Local timeline: segment renders start at t=0 regardless of where the
+    // segment sits in the whole slideshow; the layout uses the global index.
+    const start = (s * opts.perSlideSec).toFixed(3);
+    const end = ((s + 1) * opts.perSlideSec).toFixed(3);
+    for (let i = 0; i < layout.xs.length; i += 1) {
+      const x = layout.x + layout.xs[i];
+      const bright = layout.startIndex + i === slide;
+      const outLabel = `vd${slide}_${i}`;
+      filters.push(
+        `[${dotLabel}]drawbox=x=${x}:y=${layout.y}:w=${layout.diameter}:h=${layout.diameter}:` +
+          `color=${bright ? 'white@1' : 'white@0.35'}:t=fill:` +
+          `enable='between(t,${start},${end})'[${outLabel}]`,
+      );
+      dotLabel = outLabel;
+    }
+  }
+  const finalLabel = dotLabel;
   args.push('-filter_complex_threads', '1');
   args.push('-filter_complex', filters.join(';'));
   args.push(...videoCodecArgs(opts.preset, opts.crf, opts.threads));
   if (hasAudio) {
-    args.push(...audioArgs(opts.totalSec, audioInputIndex, '[vout]'));
+    args.push(...audioArgs(opts.totalSec, audioInputIndex, `[${finalLabel}]`));
   } else {
-    args.push('-map', '[vout]', '-an');
+    args.push('-map', `[${finalLabel}]`, '-an');
   }
   args.push(
     '-t',
@@ -405,10 +445,7 @@ export type MuxAudioArgsOptions = {
  * Joins per-segment MP4s (identical codec/params) with a stream copy — no
  * re-encode, so this pass is cheap even on throttled boxes.
  */
-export function buildJoinArgs(
-  listFile: string,
-  outputFile: string,
-): string[] {
+export function buildJoinArgs(listFile: string, outputFile: string): string[] {
   return [
     '-y',
     '-hide_banner',
