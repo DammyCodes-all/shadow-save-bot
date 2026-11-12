@@ -269,9 +269,7 @@ export function buildTikTokArgs(opts: TikTokArgsOptions): string[] {
   return args;
 }
 
-export function buildTikTokStillArgs(
-  opts: TikTokStillArgsOptions,
-): string[] {
+export function buildTikTokStillArgs(opts: TikTokStillArgsOptions): string[] {
   assertPositiveDuration(opts.totalSec);
   const hasAudio = Boolean(opts.musicFile);
   const args: string[] = [

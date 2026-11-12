@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { promises as fs } from 'fs';
 import { join } from 'path';
 import sharp from 'sharp';
 import { dotsRowLayout } from './slideshow.args';
@@ -22,6 +21,7 @@ export class ImageNormalizer {
     dir: string,
     width: number,
     height: number,
+    bakeDots = false,
   ): Promise<string[]> {
     const outputs: string[] = [];
     let outputIndex = 0;
@@ -31,7 +31,7 @@ export class ImageNormalizer {
         `norm-${String(outputIndex).padStart(3, '0')}.jpg`,
       );
       try {
-        await sharp(input, {
+        let pipeline = sharp(input, {
           failOn: 'none',
           limitInputPixels: 50_000_000,
           sequentialRead: true,
@@ -41,7 +41,21 @@ export class ImageNormalizer {
             fit: 'contain',
             background: BACKGROUND,
             withoutEnlargement: false,
-          })
+          });
+        // Dots go on in the same pipeline: a second decode+encode pass just
+        // to stamp dots would double sharp's work per image.
+        if (bakeDots) {
+          const overlay = this.dotsOverlay(
+            inputs.length,
+            outputIndex,
+            width,
+            height,
+          );
+          if (overlay) {
+            pipeline = pipeline.composite([overlay]);
+          }
+        }
+        await pipeline
           // Baseline JPEG on purpose: mozjpeg writes progressive scans, and
           // ffmpeg's mjpeg decoder rejects some tiny progressive files
           // (e.g. near-flat dark frames, common in real slideshows),
@@ -70,54 +84,37 @@ export class ImageNormalizer {
   }
 
   /**
-   * Bakes the TikTok progress-dot row directly into each normalized image
-   * (bright dot on the current slide, dim on the rest, sliding window when
-   * truncated). Baking avoids overlay inputs in ffmpeg entirely — looped
-   * overlay streams with framesync cost hundreds of MB of peak RAM.
+   * Builds the dot-row overlay for one slide (bright dot on the current
+   * slide, dim on the rest, sliding window when truncated). Returns null
+   * when dots don't apply. Totals use the requested image count, so a
+   * skipped image can only shift the window in the rare failure case —
+   * never the dot positions of the images that did process.
    */
-  async bakeDotsIntoImages(
-    files: string[],
+  private dotsOverlay(
+    total: number,
+    slide: number,
     width: number,
     height: number,
-  ): Promise<void> {
-    const total = files.length;
-    for (let slide = 0; slide < files.length; slide += 1) {
-      const layout = dotsRowLayout(total, slide, width, height);
-      if (!layout) {
-        throw new VideoExportError(
-          'VIDEO_RENDER_FAILED',
-          'Could not lay out progress dots.',
-        );
-      }
-      const radius = layout.diameter / 2;
-      const activeOffset = slide - layout.startIndex;
-      const circles = layout.xs
-        .map(
-          (dx, i) =>
-            `<circle cx="${dx + radius}" cy="${radius}" r="${radius}" ` +
-            `fill="white" fill-opacity="${i === activeOffset ? 1 : 0.35}"/>`,
-        )
-        .join('');
-      const svg =
-        `<svg xmlns="http://www.w3.org/2000/svg" width="${layout.stripWidth}" ` +
-        `height="${layout.stripHeight}">${circles}</svg>`;
-      const tmp = `${files[slide]}.dots.jpg`;
-      try {
-        await sharp(files[slide])
-          .composite([
-            { input: Buffer.from(svg), left: layout.x, top: layout.y },
-          ])
-          .jpeg({ quality: JPEG_QUALITY })
-          .toFile(tmp);
-        await fs.rename(tmp, files[slide]);
-      } catch (err) {
-        await fs.rm(tmp, { force: true });
-        throw new VideoExportError(
-          'VIDEO_RENDER_FAILED',
-          'Could not render progress dots.',
-          { cause: err },
-        );
-      }
+  ): { input: Buffer; left: number; top: number } | null {
+    if (total < 2) {
+      return null;
     }
+    const layout = dotsRowLayout(total, slide, width, height);
+    if (!layout) {
+      return null;
+    }
+    const radius = layout.diameter / 2;
+    const activeOffset = slide - layout.startIndex;
+    const circles = layout.xs
+      .map(
+        (dx, i) =>
+          `<circle cx="${dx + radius}" cy="${radius}" r="${radius}" ` +
+          `fill="white" fill-opacity="${i === activeOffset ? 1 : 0.35}"/>`,
+      )
+      .join('');
+    const svg =
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${layout.stripWidth}" ` +
+      `height="${layout.stripHeight}">${circles}</svg>`;
+    return { input: Buffer.from(svg), left: layout.x, top: layout.y };
   }
 }

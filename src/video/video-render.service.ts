@@ -206,11 +206,15 @@ export class VideoRenderService implements OnModuleInit, OnModuleDestroy {
         config.height,
         this.ffmpegThreads(),
       );
+      // Dots bake into TikTok slideshow frames during normalization (same
+      // Sharp pass, no extra decode/encode). Singles and Instagram skip them.
+      const bakeDots = request.platform === 'tiktok' && downloaded.length >= 2;
       let normalized = await this.normalizer.normalizeAll(
         downloaded,
         jobDir,
         ladder[0].width,
         ladder[0].height,
+        bakeDots,
       );
       const outputFile = join(jobDir, 'out.mp4');
       let width = ladder[0].width;
@@ -229,6 +233,7 @@ export class VideoRenderService implements OnModuleInit, OnModuleDestroy {
             jobDir,
             rung.width,
             rung.height,
+            bakeDots,
           );
           width = rung.width;
           height = rung.height;
@@ -262,11 +267,6 @@ export class VideoRenderService implements OnModuleInit, OnModuleDestroy {
                 config.renderTimeoutMs,
               );
             } else {
-              await this.normalizer.bakeDotsIntoImages(
-                normalized,
-                rung.width,
-                rung.height,
-              );
               this.logger.log(
                 `job ${jobId} tiktok images=${normalized.length} perSlide=${timing.perSlideSec}s transition=${timing.transitionSec}s total=${timing.totalSec}s audio=${musicFile ? 'yes' : 'no'} preset=${rung.preset} ${rung.width}x${rung.height}`,
               );
